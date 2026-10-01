@@ -13,19 +13,21 @@ export default function LoginPage() {
   useEffect(() => {
     if (!router.isReady) return;
     const error = router.query.error;
+    const loggedOut = router.query.loggedOut === '1';
     if (error === 'oauth_state_invalid') setErrorMessage('Phiên đăng nhập hết hạn hoặc không hợp lệ. Hãy thử lại.');
     if (error === 'oauth_failed') setErrorMessage('Facebook không hoàn tất đăng nhập. Kiểm tra Meta App và callback URL.');
+    if (loggedOut) setErrorMessage('Bạn đã đăng xuất. Mọi phiên Facebook cũ đã được xóa khỏi trình duyệt.');
 
     authApi.me()
       .then(() => {
         const next = typeof router.query.next === 'string' && router.query.next.startsWith('/') && !router.query.next.startsWith('//')
           ? router.query.next
-          : '/';
+          : '/dashboard';
         router.replace(next);
       })
       .catch(() => {})
       .finally(() => authApi.status().then(setAuthStatus).catch(() => setAuthStatus({ configured: false, missing: ['API backend'] })).finally(() => setLoading(false)));
-  }, [router.isReady]);
+  }, [router.isReady, router.query.error, router.query.loggedOut, router.query.next]);
 
   const startFacebookLogin = () => {
     window.location.assign(authApi.facebookLoginUrl);

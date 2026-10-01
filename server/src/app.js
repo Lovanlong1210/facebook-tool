@@ -10,7 +10,12 @@ const { sql, getPool } = require('../config/db');
 const { parseBulkExcel } = require('./modules/excel-parser/excelService');
 const { addPostToQueue, removePostFromQueue } = require('../queues/post.queue');
 const { getFacebookPageAccessToken } = require('./utils/FacebookPageAccessToken');
-const { saveFacebookUser, syncFacebookPages, getStoredUserAccessToken } = require('./utils/FacebookPageConnections');
+const {
+  saveFacebookUser,
+  syncFacebookPages,
+  getStoredUserAccessToken,
+  getConnectedPages
+} = require('./utils/FacebookPageConnections');
 const {
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE,
@@ -22,7 +27,6 @@ const {
   facebookRedirectUri,
   loadSession,
   parseCookies,
-  requireAdmin,
   requireAuth,
   setCookie,
   signSession
@@ -72,6 +76,27 @@ function localMediaFilename(link) {
   if (typeof link !== 'string' || !link.startsWith('local://')) return null;
   const fileName = link.slice('local://'.length);
   return path.basename(fileName) === fileName && /^[a-f0-9-]+\.[a-z0-9]+$/i.test(fileName) ? fileName : null;
+}
+
+let postOwnershipSchema;
+async function ensurePostOwnershipSchema() {
+  if (!postOwnershipSchema) {
+    postOwnershipSchema = getPool().then((pool) => pool.request().query(`
+      IF COL_LENGTH('dbo.Posts', 'created_by_user_id') IS NULL
+        ALTER TABLE dbo.Posts ADD created_by_user_id varchar(64) NULL;
+      IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_Posts_created_by_user_id' AND object_id=OBJECT_ID('dbo.Posts'))
+        CREATE INDEX IX_Posts_created_by_user_id ON dbo.Posts(created_by_user_id, scheduled_at DESC);
+    `)).catch((error) => {
+      postOwnershipSchema = null;
+      throw error;
+    });
+  }
+  await postOwnershipSchema;
+}
+
+async function userOwnsPage(userId, pageId) {
+  const pages = await getConnectedPages(userId);
+  return pages.some((page) => String(page.id) === String(pageId));
 }
 
 app.get('/api/auth/status', (_req, res) => {
@@ -156,19 +181,20 @@ app.get('/api/auth/facebook/callback', async (req, res) => {
     const connectedPages = await syncFacebookPages(profileResponse.data.id, userAccessToken);
     console.log(`[Facebook OAuth] Connected ${connectedPages.length} Page(s) for user ${profileResponse.data.id}.`);
     setCookie(req, res, SESSION_COOKIE, signSession(profileResponse.data), SESSION_TTL_SECONDS);
-    return res.redirect(`${clientOrigin()}/`);
+    return res.redirect(`${clientOrigin()}/dashboard`);
   } catch (error) {
     console.error('[Facebook OAuth Error]', error.response?.status || error.message);
     return res.redirect(`${clientOrigin()}/login?error=oauth_failed`);
   }
 });
 
-app.post('/api/auth/logout', requireAuth, (req, res) => {
-  clearCookie(req, res, SESSION_COOKIE);
+app.post('/api/auth/logout', (_req, res) => {
+  clearCookie(_req, res, SESSION_COOKIE);
+  clearCookie(_req, res, OAUTH_STATE_COOKIE);
   return res.json({ success: true });
 });
 
-app.post('/api/media', requireAdmin, handleMediaUpload, (req, res) => {
+app.post('/api/media', requireAuth, handleMediaUpload, (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'Vui lòng chọn ảnh hoặc video.' });
   return res.status(201).json({
     success: true,
@@ -211,13 +237,13 @@ app.post('/api/ai/chat', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/channels', requireAuth, async (_req, res) => {
+app.get('/api/channels', requireAuth, async (req, res) => {
   try {
-    const userToken = await getStoredUserAccessToken(_req.user.sub);
+    const userToken = await getStoredUserAccessToken(req.user.sub);
     if (!userToken) {
       return res.status(409).json({ success: false, message: 'Phiên Facebook chưa có token Page. Hãy đăng xuất rồi đăng nhập lại để đồng bộ Page.' });
     }
-    const channels = await syncFacebookPages(_req.user.sub, userToken);
+    const channels = await syncFacebookPages(req.user.sub, userToken);
     return res.json({ success: true, channels });
   } catch (error) {
     return sendApiError(res, 'Channels Error', error, 'Không thể đồng bộ Page từ Facebook. Kiểm tra quyền pages_show_list và pages_read_engagement.');
@@ -241,7 +267,7 @@ app.get('/api/posts/template', (_req, res) => {
   return res.send(buffer);
 });
 
-app.post('/api/posts', requireAdmin, async (req, res) => {
+app.post('/api/posts', requireAuth, async (req, res) => {
   const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
   const pageId = String(req.body.pageId || process.env.FACEBOOK_PAGE_ID || '').trim();
   const mediaType = String(req.body.mediaType || 'text').toLowerCase();
@@ -258,6 +284,10 @@ app.post('/api/posts', requireAdmin, async (req, res) => {
 
   const comments = Array.isArray(req.body.comments) ? req.body.comments.slice(0, 5) : [];
   try {
+    await ensurePostOwnershipSchema();
+    if (!await userOwnsPage(req.user.sub, pageId)) {
+      return res.status(403).json({ success: false, message: 'Fanpage này chưa được kết nối với tài khoản Facebook đang đăng nhập.' });
+    }
     const pool = await getPool();
     const transaction = new sql.Transaction(pool);
     await transaction.begin();
@@ -265,12 +295,13 @@ app.post('/api/posts', requireAdmin, async (req, res) => {
     try {
       const result = await new sql.Request(transaction)
         .input('pageId', sql.VarChar, pageId)
+        .input('ownerId', sql.VarChar(64), req.user.sub)
         .input('content', sql.NVarChar, content)
         .input('mediaType', sql.VarChar, mediaType)
         .input('mediaLinks', sql.NVarChar, JSON.stringify(mediaLinks))
         .input('scheduledAt', sql.DateTime2, scheduledAt)
         .input('status', sql.VarChar, 'pending')
-        .query('INSERT INTO Posts (page_id, content, media_type, media_links, scheduled_at, status) OUTPUT INSERTED.id VALUES (@pageId, @content, @mediaType, @mediaLinks, @scheduledAt, @status);');
+        .query('INSERT INTO Posts (page_id, content, media_type, media_links, scheduled_at, status, created_by_user_id) OUTPUT INSERTED.id VALUES (@pageId, @content, @mediaType, @mediaLinks, @scheduledAt, @status, @ownerId);');
       postId = result.recordset[0].id;
       for (const [index, comment] of comments.entries()) {
         if (typeof comment.content !== 'string' || !comment.content.trim()) continue;
@@ -304,6 +335,7 @@ app.post('/api/posts', requireAdmin, async (req, res) => {
 
 app.get('/api/posts', requireAuth, async (req, res) => {
   try {
+    await ensurePostOwnershipSchema();
     const pool = await getPool();
     const pageValue = Number.parseInt(req.query.page, 10);
     const limitValue = Number.parseInt(req.query.limit, 10);
@@ -324,6 +356,11 @@ app.get('/api/posts', requireAuth, async (req, res) => {
       countRequest.input('pageId', sql.VarChar, pageId);
       postsRequest.input('pageId', sql.VarChar, pageId);
     }
+    if (req.user.role !== 'admin') {
+      filters.push('created_by_user_id = @ownerId');
+      countRequest.input('ownerId', sql.VarChar(64), req.user.sub);
+      postsRequest.input('ownerId', sql.VarChar(64), req.user.sub);
+    }
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     const count = await countRequest.query(`SELECT COUNT(*) AS total FROM Posts ${whereClause}`);
     const result = await postsRequest.input('offset', sql.Int, (page - 1) * limit).input('limit', sql.Int, limit).query(`SELECT * FROM Posts ${whereClause} ORDER BY scheduled_at DESC, id DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;`);
@@ -334,10 +371,14 @@ app.get('/api/posts', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/posts/stats', requireAuth, async (_req, res) => {
+app.get('/api/posts/stats', requireAuth, async (req, res) => {
   try {
+    await ensurePostOwnershipSchema();
     const pool = await getPool();
-    const result = await pool.request().query("SELECT COUNT(*) AS total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS published, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed FROM Posts;");
+    const request = pool.request();
+    const where = req.user.role === 'admin' ? '' : 'WHERE created_by_user_id=@ownerId';
+    if (req.user.role !== 'admin') request.input('ownerId', sql.VarChar(64), req.user.sub);
+    const result = await request.query(`SELECT COUNT(*) AS total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS published, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed FROM Posts ${where};`);
     const stats = result.recordset[0];
     return res.json({ success: true, stats: { total: Number(stats.total || 0), pending: Number(stats.pending || 0), published: Number(stats.published || 0), failed: Number(stats.failed || 0) } });
   } catch (error) {
@@ -347,8 +388,15 @@ app.get('/api/posts/stats', requireAuth, async (_req, res) => {
 });
 
 app.get('/api/reports/insights', requireAuth, async (req, res) => {
-  const pageId = process.env.FACEBOOK_PAGE_ID;
-  if (!pageId) return res.status(503).json({ success: false, available: false, message: 'Chưa cấu hình Facebook Page.' });
+  let pageId = req.query.pageId ? String(req.query.pageId) : '';
+  try {
+    const pages = await getConnectedPages(req.user.sub);
+    pageId = pageId || pages[0]?.id;
+    if (!pageId) return res.status(409).json({ success: false, available: false, message: 'Tài khoản chưa có Fanpage đã kết nối.' });
+    if (!pages.some((page) => String(page.id) === pageId)) return res.status(403).json({ success: false, available: false, message: 'Không có quyền xem Insights của Fanpage này.' });
+  } catch (error) {
+    return sendApiError(res, 'Insights Page Lookup Error', error, 'Không thể tải danh sách Fanpage.');
+  }
   const daysValue = Number.parseInt(req.query.days, 10);
   const days = [7, 14, 30].includes(daysValue) ? daysValue : 14;
   const until = new Date();
@@ -370,12 +418,16 @@ app.get('/api/reports/insights', requireAuth, async (req, res) => {
 });
 
 app.get('/api/posts/:postId/publish-now', (_req, res) => res.status(405).json({ success: false, message: 'Dùng POST để đưa bài vào hàng đợi.' }));
-app.post('/api/posts/:postId/publish-now', requireAdmin, async (req, res) => {
+app.post('/api/posts/:postId/publish-now', requireAuth, async (req, res) => {
   const postId = Number.parseInt(req.params.postId, 10);
   if (!Number.isSafeInteger(postId) || postId <= 0) return res.status(400).json({ success: false, message: 'ID bài đăng không hợp lệ.' });
   try {
+    await ensurePostOwnershipSchema();
     const pool = await getPool();
-    const result = await pool.request().input('id', sql.Int, postId).input('scheduledAt', sql.DateTime2, new Date()).query("UPDATE Posts SET scheduled_at=@scheduledAt,status='pending' OUTPUT INSERTED.id WHERE id=@id AND status IN ('pending','failed');");
+    const request = pool.request().input('id', sql.Int, postId).input('scheduledAt', sql.DateTime2, new Date());
+    const ownerFilter = req.user.role === 'admin' ? '' : ' AND created_by_user_id=@ownerId';
+    if (req.user.role !== 'admin') request.input('ownerId', sql.VarChar(64), req.user.sub);
+    const result = await request.query(`UPDATE Posts SET scheduled_at=@scheduledAt,status='pending' OUTPUT INSERTED.id WHERE id=@id AND status IN ('pending','failed')${ownerFilter};`);
     if (!result.recordset.length) return res.status(409).json({ success: false, message: 'Không tìm thấy bài chờ đăng hoặc bài đang xử lý.' });
     await addPostToQueue(postId, new Date());
     return res.status(202).json({ success: true, message: 'Đã đưa bài đăng vào hàng đợi.' });
@@ -385,14 +437,16 @@ app.post('/api/posts/:postId/publish-now', requireAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/posts/:postId', requireAdmin, async (req, res) => {
+app.delete('/api/posts/:postId', requireAuth, async (req, res) => {
   const postId = Number.parseInt(req.params.postId, 10);
   if (!Number.isSafeInteger(postId) || postId <= 0) return res.status(400).json({ success: false, message: 'ID bài đăng không hợp lệ.' });
   try {
+    await ensurePostOwnershipSchema();
     const pool = await getPool();
-    const result = await pool.request().input('id', sql.Int, postId).query('SELECT id,status,media_links FROM Posts WHERE id=@id');
+    const result = await pool.request().input('id', sql.Int, postId).query('SELECT id,status,media_links,created_by_user_id FROM Posts WHERE id=@id');
     const post = result.recordset[0];
     if (!post) return res.status(404).json({ success: false, message: 'Không tìm thấy bài đăng.' });
+    if (req.user.role !== 'admin' && post.created_by_user_id !== req.user.sub) return res.status(404).json({ success: false, message: 'Không tìm thấy bài đăng.' });
     if (!['pending', 'failed'].includes(post.status)) return res.status(409).json({ success: false, message: 'Chỉ xóa được bài chờ hoặc thất bại.' });
     await removePostFromQueue(postId);
     const transaction = new sql.Transaction(pool);
@@ -418,26 +472,33 @@ app.delete('/api/posts/:postId', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/posts/bulk-upload', requireAdmin, memoryUpload.single('file'), async (req, res) => {
+app.post('/api/posts/bulk-upload', requireAuth, memoryUpload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'Vui lòng upload file Excel.' });
+    await ensurePostOwnershipSchema();
     const posts = parseBulkExcel(req.file.buffer);
     const pool = await getPool();
+    const connectedPages = await getConnectedPages(req.user.sub);
+    const connectedPageIds = new Set(connectedPages.map((page) => String(page.id)));
+    const defaultPageId = connectedPages[0]?.id;
     const createdIds = [];
     const errors = [];
     for (const post of posts) {
       const transaction = new sql.Transaction(pool);
       try {
         await transaction.begin();
+        const pageId = String(post.pageId || defaultPageId || '');
+        if (!connectedPageIds.has(pageId)) throw new Error('Page trong dòng Excel chưa được kết nối với Facebook account này.');
         const inserted = await new sql.Request(transaction)
-          .input('pageId', sql.VarChar, post.pageId || process.env.FACEBOOK_PAGE_ID)
+          .input('pageId', sql.VarChar, pageId)
+          .input('ownerId', sql.VarChar(64), req.user.sub)
           .input('content', sql.NVarChar, post.content)
           .input('mediaType', sql.VarChar, post.mediaType)
           .input('mediaLinks', sql.NVarChar, JSON.stringify(post.mediaLinks))
           .input('mediaThumb', sql.VarChar, post.mediaThumb)
           .input('scheduledAt', sql.DateTime2, post.scheduledAt)
           .input('status', sql.VarChar, 'pending')
-          .query('INSERT INTO Posts (page_id,content,media_type,media_links,media_thumb,scheduled_at,status) OUTPUT INSERTED.id VALUES (@pageId,@content,@mediaType,@mediaLinks,@mediaThumb,@scheduledAt,@status);');
+          .query('INSERT INTO Posts (page_id,content,media_type,media_links,media_thumb,scheduled_at,status,created_by_user_id) OUTPUT INSERTED.id VALUES (@pageId,@content,@mediaType,@mediaLinks,@mediaThumb,@scheduledAt,@status,@ownerId);');
         const postId = inserted.recordset[0].id;
         for (const comment of post.comments) {
           await new sql.Request(transaction)

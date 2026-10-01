@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 const navigation = [
-  { label: 'Bảng tin', href: '/', icon: LayoutDashboard },
+  { label: 'Bảng tin', href: '/dashboard', icon: LayoutDashboard },
   { label: 'AI Studio', href: '/ai-studio', icon: Sparkles },
   { label: 'Viết bài', href: '/post-planner/compose', icon: PenLine },
   { label: 'Lịch đăng', href: '/post-planner/calendar', icon: CalendarDays },

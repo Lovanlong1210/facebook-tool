@@ -1,51 +1,110 @@
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CalendarDays, CircleAlert, FileSpreadsheet, PenLine, Send, Sparkles } from 'lucide-react';
-import MainLayout from '../components/layout/MainLayout';
-import postApi from '../services/postApi';
+import Image from 'next/image';
+import { ArrowRight, CalendarRange, CheckCircle2, Globe2, Layers3, PenSquare, Sparkles } from 'lucide-react';
 
-export default function HomePage() {
-  const [stats, setStats] = useState({ total: 0, pending: 0, published: 0, failed: 0 });
-  const [posts, setPosts] = useState([]);
-  const [error, setError] = useState('');
+const featureList = [
+  'Tạo lịch đăng bài tự động cho nhiều Fanpage',
+  'Upload hình ảnh, video và đồng bộ nội dung theo mẫu Excel',
+  'Theo dõi hiệu suất, trạng thái và kênh đã kết nối',
+  'Quản lý AI Studio, nội dung sáng tạo và workflow nội dung nhanh'
+];
 
-  useEffect(() => {
-    Promise.all([postApi.getStats(), postApi.getPostsList({ limit: 5 })])
-      .then(([summary, result]) => {
-        setStats(summary.stats);
-        setPosts(result.posts || []);
-      })
-      .catch((requestError) => setError(requestError.response?.data?.message || 'Không thể tải dữ liệu bảng tin.'));
-  }, []);
-
-  const cards = [
-    { label: 'Bài đăng', value: stats.total, note: 'Tổng trong hệ thống', icon: Send },
-    { label: 'Đang chờ', value: stats.pending, note: 'Chờ tới lịch đăng', icon: CalendarDays },
-    { label: 'Đã xuất bản', value: stats.published, note: 'Đã đăng thành công', icon: PenLine },
-    { label: 'Cần kiểm tra', value: stats.failed, note: 'Bài đăng thất bại', icon: CircleAlert }
-  ];
-
+export default function LandingPage() {
   return (
-    <MainLayout title="Bảng tin">
-      <section className="home-banner">
-        <div><h2>Chào mừng trở lại</h2><p>Quản lý nội dung và lịch đăng trên các kênh của bạn.</p></div>
-        <div className="home-banner-actions"><Link className="button button-primary" href="/post-planner/compose"><PenLine size={15} /> Viết bài</Link><Link className="button button-secondary" href="/post-planner/bulk-upload"><FileSpreadsheet size={15} /> Tải Excel</Link></div>
-      </section>
-      <section className="metric-grid">
-        {cards.map(({ label, value, note, icon: Icon }) => <article className="panel metric-card" key={label}><div className="metric-label"><Icon size={16} />{label}</div><div className="metric-value">{value}</div><div className="metric-foot">{note}</div></article>)}
-      </section>
-      {error && <div className="notice" style={{ marginBottom: 14 }}>{error}</div>}
-      <div className="home-columns">
-        <section className="panel"><div className="panel-heading"><h2>Bài đăng gần đây</h2><Link className="button button-secondary" href="/post-planner/list">Xem tất cả</Link></div><div className="panel-body">
-          {posts.length ? posts.map((post) => <div className="post-row" key={post.id}><div><strong>{post.content || 'Chưa có nội dung'}</strong><small>#{post.id} · {post.scheduled_at ? new Date(post.scheduled_at).toLocaleString('vi-VN') : 'Chưa đặt lịch'}</small></div><span className={`status-pill ${post.status || 'pending'}`}>{post.status || 'pending'}</span></div>) : <div className="empty-state">Chưa có bài đăng gần đây.</div>}
-        </div></section>
-        <section className="panel"><div className="panel-heading"><h2>Truy cập nhanh</h2></div><div className="panel-body quick-links">
-          <Link className="quick-link" href="/post-planner/calendar"><span className="quick-icon"><CalendarDays size={17} /></span><span><strong>Lịch đăng</strong><small>Xem bài theo ngày</small></span></Link>
-          <Link className="quick-link" href="/ai-studio"><span className="quick-icon"><Sparkles size={17} /></span><span><strong>AI Studio</strong><small>Mở không gian sáng tạo</small></span></Link>
-          <Link className="quick-link" href="/channels"><span className="quick-icon"><Send size={17} /></span><span><strong>Kênh đăng</strong><small>Kiểm tra Fanpage</small></span></Link>
-          <Link className="quick-link" href="/post-planner/bulk-upload"><span className="quick-icon"><FileSpreadsheet size={17} /></span><span><strong>Tải hàng loạt</strong><small>Nhập lịch từ Excel</small></span></Link>
-        </div></section>
+    <main style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0f172a 0%, #111827 35%, #1d4ed8 100%)', color: '#f8fafc', padding: '32px 20px 48px' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 48 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Image src="/brand-logo.jpg" alt="SO9 social workspace" width={42} height={42} priority />
+            <div>
+              <div style={{ fontSize: 12, letterSpacing: 2, opacity: 0.8 }}>SO9 SOCIAL WORKSPACE</div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>Fanpage Automation</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Link href="/login" style={{ color: '#e2e8f0', textDecoration: 'none', fontWeight: 600 }}>Đăng nhập</Link>
+            <Link href="/login" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#0f172a', padding: '10px 18px', borderRadius: 999, textDecoration: 'none', fontWeight: 700 }}>
+              <Globe2 size={18} /> Tiếp tục với Facebook
+            </Link>
+          </div>
+        </header>
+
+        <section style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 32, alignItems: 'center' }}>
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(59,130,246,0.18)', border: '1px solid rgba(147,197,253,0.3)', borderRadius: 999, padding: '8px 12px', marginBottom: 18 }}>
+              <Sparkles size={16} /> Tự động hóa nội dung và fanpage
+            </div>
+            <h1 style={{ fontSize: 'clamp(2.5rem, 5vw, 5rem)', lineHeight: 1.05, margin: '0 0 18px', maxWidth: 620 }}>
+              Quản lý xuất bản trên Facebook dễ như một click.
+            </h1>
+            <p style={{ maxWidth: 600, fontSize: 18, lineHeight: 1.7, color: '#cbd5e1', marginBottom: 28 }}>
+              Xây dựng lịch đăng, đồng bộ Fanpage, upload media hàng loạt và theo dõi các bài đã xuất bản từ một không gian làm việc duy nhất.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginBottom: 26 }}>
+              <Link href="/login" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#2563eb', color: '#fff', padding: '14px 22px', borderRadius: 14, textDecoration: 'none', fontWeight: 700 }}>
+                Đăng nhập bằng Facebook <ArrowRight size={18} />
+              </Link>
+              <Link href="/dashboard" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '14px 22px', borderRadius: 14, textDecoration: 'none', fontWeight: 600 }}>
+                Vào workspace
+              </Link>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16, maxWidth: 620 }}>
+              {[
+                { label: 'Fanpage', value: '100+' },
+                { label: 'Bài/tuần', value: '2.4k' },
+                { label: 'Tỷ lệ hoàn tất', value: '94%' }
+              ].map((stat) => (
+                <div key={stat.label} style={{ background: 'rgba(15, 23, 42, 0.45)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 16, padding: 18 }}>
+                  <div style={{ fontSize: 28, fontWeight: 800 }}>{stat.value}</div>
+                  <div style={{ fontSize: 13, color: '#cbd5e1' }}>{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ background: 'rgba(15, 23, 42, 0.52)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 24, padding: 24, boxShadow: '0 24px 80px rgba(15,23,42,0.5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 12, letterSpacing: 2, color: '#93c5fd' }}>WORKFLOW</div>
+                <div style={{ fontWeight: 700, fontSize: 24 }}>Quá trình làm việc</div>
+              </div>
+              <div style={{ background: '#1d4ed8', borderRadius: 10, padding: '8px 10px' }}><Layers3 size={18} /></div>
+            </div>
+            <div style={{ display: 'grid', gap: 14 }}>
+              {[
+                { title: 'Kết nối Fanpage', icon: Globe2 },
+                { title: 'Viết nội dung & lịch đăng', icon: PenSquare },
+                { title: 'Theo dõi và tối ưu', icon: CalendarRange }
+              ].map(({ title, icon: Icon }, index) => (
+                <div key={title} style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(30,41,59,0.8)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 16, padding: 14 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(37,99,235,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon size={18} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{index + 1}. {title}</div>
+                    <div style={{ fontSize: 12, color: '#cbd5e1' }}>Đồng bộ với tài khoản Facebook đã đăng nhập</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section style={{ marginTop: 56, background: 'rgba(15, 23, 42, 0.42)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 26, padding: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+            <CheckCircle2 color="#34d399" />
+            <h2 style={{ margin: 0, fontSize: 28 }}>Tại sao doanh nghiệp lựa chọn</h2>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+            {featureList.map((item) => (
+              <div key={item} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(15, 23, 42, 0.35)', borderRadius: 16, padding: 18, border: '1px solid rgba(148,163,184,0.18)' }}>
+                <CheckCircle2 size={18} color="#93c5fd" />
+                <span style={{ color: '#e2e8f0', lineHeight: 1.6 }}>{item}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
-    </MainLayout>
+    </main>
   );
 }

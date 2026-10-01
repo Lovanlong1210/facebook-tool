@@ -9,7 +9,7 @@ export default function useAuth() {
 
 	useEffect(() => {
 		if (!router.isReady) return;
-		if (router.pathname === '/login') {
+		if (router.pathname === '/login' || router.pathname === '/') {
 			setLoading(false);
 			return;
 		}
@@ -31,7 +31,7 @@ export default function useAuth() {
 	const logout = async () => {
 		try { await authApi.logout(); } finally {
 			setUser(null);
-			await router.replace('/login');
+			await router.replace('/login?loggedOut=1');
 		}
 	};
 
