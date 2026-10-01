@@ -45,10 +45,19 @@ function getSessionSecret() {
 
 function authConfiguration() {
   const missing = [];
-  if (!process.env.FACEBOOK_APP_ID) missing.push('FACEBOOK_APP_ID');
-  if (!process.env.FACEBOOK_APP_SECRET) missing.push('FACEBOOK_APP_SECRET');
-  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) missing.push('SESSION_SECRET (tối thiểu 32 ký tự)');
-  if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_ID === process.env.FACEBOOK_PAGE_ID) {
+  const appId = (process.env.FACEBOOK_APP_ID || '').trim();
+  const appSecret = (process.env.FACEBOOK_APP_SECRET || '').trim();
+
+  if (!appId || appId === 'your_facebook_app_id' || !/^\d+$/.test(appId)) {
+    missing.push('FACEBOOK_APP_ID (cần là dãy số ID hợp lệ từ Meta for Developers)');
+  }
+  if (!appSecret || appSecret === 'your_facebook_app_secret' || appSecret.length < 8) {
+    missing.push('FACEBOOK_APP_SECRET (cần là App Secret từ Meta for Developers)');
+  }
+  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
+    missing.push('SESSION_SECRET (tối thiểu 32 ký tự)');
+  }
+  if (appId && appId === process.env.FACEBOOK_PAGE_ID) {
     missing.push('FACEBOOK_APP_ID phải là Meta App ID, không phải FACEBOOK_PAGE_ID');
   }
   return { configured: missing.length === 0, missing, adminConfigured: adminIds().size > 0 };
@@ -58,18 +67,8 @@ function facebookRedirectUri() {
   return process.env.FACEBOOK_REDIRECT_URI || 'http://localhost:5000/api/auth/facebook/callback';
 }
 
-function clientOrigins() {
-  const configured = (process.env.CLIENT_ORIGIN || 'http://localhost:3001,http://localhost:3000')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
-    .map((origin) => origin.replace(/\/$/, ''));
-  const preferred = ['http://localhost:3001', 'http://localhost:3000'];
-  return [...new Set([...configured, ...preferred])];
-}
-
 function clientOrigin() {
-  return clientOrigins()[0];
+  return (process.env.CLIENT_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
 }
 
 function adminIds() {
@@ -125,7 +124,10 @@ function loadSession(req, _res, next) {
 function originIsAllowed(req) {
   const origin = req.get('origin');
   if (!origin) return true;
-  return clientOrigins().includes(origin.replace(/\/$/, ''));
+  if (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.endsWith(':3000')) {
+    return true;
+  }
+  return origin === clientOrigin();
 }
 
 function requireAuth(req, res, next) {

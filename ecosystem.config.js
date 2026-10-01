@@ -2,10 +2,11 @@ module.exports = {
   apps: [
     {
       name: 'tool-face-backend',
-      script: './server/src/app.js', // 👈 Đổi lại đúng file chạy Backend (index.js hoặc app.js)
+      script: './server/src/app.js',
       env: {
         NODE_ENV: 'production',
-        PORT: 5000
+        PORT: 5000,
+        DISABLE_EMBEDDED_WORKER: 'true'
       }
     },
     {

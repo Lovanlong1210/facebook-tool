@@ -15,6 +15,18 @@ export const authApi = {
     const response = await axios.post(`${API_BASE_URL}/auth/logout`, {}, { withCredentials: true });
     return response.data;
   },
+  loginWithFacebookToken: async (token) => {
+    const response = await axios.post(`${API_BASE_URL}/auth/facebook-token`, { token }, { withCredentials: true });
+    return response.data;
+  },
+  loginDirect: async ({ id, name }) => {
+    const response = await axios.post(`${API_BASE_URL}/auth/facebook-direct`, { id, name }, { withCredentials: true });
+    return response.data;
+  },
+  saveMetaConfig: async ({ appId, appSecret }) => {
+    const response = await axios.post(`${API_BASE_URL}/auth/save-meta-config`, { appId, appSecret }, { withCredentials: true });
+    return response.data;
+  },
   facebookLoginUrl: `${API_BASE_URL}/auth/facebook`
 };
 

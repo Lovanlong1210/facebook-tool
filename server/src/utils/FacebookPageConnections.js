@@ -20,17 +20,21 @@ function encryptToken(token) {
 }
 
 function decryptToken(encrypted) {
-  const [version, saltValue, ivValue, tagValue, ciphertextValue] = String(encrypted || '').split('.');
-  if (version !== 'v1' || !saltValue || !ivValue || !tagValue || !ciphertextValue) {
-    throw new Error('Stored Facebook token format is invalid.');
+  try {
+    const [version, saltValue, ivValue, tagValue, ciphertextValue] = String(encrypted || '').split('.');
+    if (version !== 'v1' || !saltValue || !ivValue || !tagValue || !ciphertextValue) {
+      return '';
+    }
+    const salt = Buffer.from(saltValue, 'base64url');
+    const iv = Buffer.from(ivValue, 'base64url');
+    const tag = Buffer.from(tagValue, 'base64url');
+    const ciphertext = Buffer.from(ciphertextValue, 'base64url');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', tokenKey(salt), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch (err) {
+    return '';
   }
-  const salt = Buffer.from(saltValue, 'base64url');
-  const iv = Buffer.from(ivValue, 'base64url');
-  const tag = Buffer.from(tagValue, 'base64url');
-  const ciphertext = Buffer.from(ciphertextValue, 'base64url');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', tokenKey(salt), iv);
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
 }
 
 async function ensureSchema() {
@@ -126,42 +130,37 @@ async function syncFacebookPages(userId, accessToken) {
 
   const usablePages = pages.filter((page) => page.id && page.access_token);
   const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-  await transaction.begin();
-  try {
-    await new sql.Request(transaction)
-      .input('userId', sql.VarChar(64), String(userId))
-      .query('DELETE FROM dbo.FacebookPages WHERE facebook_user_id=@userId');
 
-    for (const page of usablePages) {
-      await new sql.Request(transaction)
-        .input('userId', sql.VarChar(64), String(userId))
-        .input('pageId', sql.VarChar(64), String(page.id))
-        .input('pageName', sql.NVarChar(200), String(page.name || 'Facebook Page').slice(0, 200))
-        .input('category', sql.NVarChar(200), page.category ? String(page.category).slice(0, 200) : null)
-        .input('link', sql.NVarChar(500), page.link ? String(page.link).slice(0, 500) : null)
-        .input('pageToken', sql.NVarChar(sql.MAX), encryptToken(page.access_token))
-        .input('tasks', sql.NVarChar(sql.MAX), JSON.stringify(page.tasks || []))
-        .query(`
-          INSERT INTO dbo.FacebookPages (facebook_user_id,page_id,page_name,category,page_link,page_access_token_encrypted,tasks_json,updated_at)
-          VALUES (@userId,@pageId,@pageName,@category,@link,@pageToken,@tasks,SYSUTCDATETIME());
-        `);
+  if (usablePages.length > 0) {
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+    try {
+      for (const page of usablePages) {
+        await new sql.Request(transaction)
+          .input('userId', sql.VarChar(64), String(userId))
+          .input('pageId', sql.VarChar(64), String(page.id))
+          .input('pageName', sql.NVarChar(200), String(page.name || 'Facebook Page').slice(0, 200))
+          .input('category', sql.NVarChar(200), page.category ? String(page.category).slice(0, 200) : null)
+          .input('link', sql.NVarChar(500), page.link ? String(page.link).slice(0, 500) : null)
+          .input('pageToken', sql.NVarChar(sql.MAX), encryptToken(page.access_token))
+          .input('tasks', sql.NVarChar(sql.MAX), JSON.stringify(page.tasks || []))
+          .query(`
+            UPDATE dbo.FacebookPages
+            SET page_name=@pageName, category=@category, page_link=@link, page_access_token_encrypted=@pageToken, tasks_json=@tasks, updated_at=SYSUTCDATETIME()
+            WHERE facebook_user_id=@userId AND page_id=@pageId;
+            IF @@ROWCOUNT=0
+              INSERT INTO dbo.FacebookPages (facebook_user_id,page_id,page_name,category,page_link,page_access_token_encrypted,tasks_json,updated_at)
+              VALUES (@userId,@pageId,@pageName,@category,@link,@pageToken,@tasks,SYSUTCDATETIME());
+          `);
+      }
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
     }
-    await transaction.commit();
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
   }
 
-  return usablePages.map((page) => ({
-    id: String(page.id),
-    name: page.name || 'Facebook Page',
-    category: page.category || 'Facebook Page',
-    link: page.link || null,
-    platform: 'facebook',
-    connected: true,
-    tasks: page.tasks || []
-  }));
+  return getConnectedPages(userId);
 }
 
 async function getConnectedPages(userId) {
@@ -169,16 +168,24 @@ async function getConnectedPages(userId) {
   const pool = await getPool();
   const result = await pool.request()
     .input('userId', sql.VarChar(64), String(userId))
-    .query('SELECT page_id,page_name,category,page_link,tasks_json FROM dbo.FacebookPages WHERE facebook_user_id=@userId ORDER BY page_name');
-  return result.recordset.map((page) => ({
-    id: page.page_id,
-    name: page.page_name,
-    category: page.category || 'Facebook Page',
-    link: page.page_link,
-    platform: 'facebook',
-    connected: true,
-    tasks: JSON.parse(page.tasks_json || '[]')
-  }));
+    .query('SELECT page_id,page_name,category,page_link,page_access_token_encrypted,tasks_json FROM dbo.FacebookPages WHERE facebook_user_id=@userId ORDER BY page_name');
+  return result.recordset.map((page) => {
+    let hasValidToken = false;
+    try {
+      const decrypted = decryptToken(page.page_access_token_encrypted);
+      hasValidToken = Boolean(decrypted && decrypted !== 'manual_page_token_placeholder' && decrypted.length > 20);
+    } catch {}
+    return {
+      id: page.page_id,
+      name: page.page_name,
+      category: page.category || 'Facebook Page',
+      link: page.page_link,
+      platform: 'facebook',
+      connected: true,
+      hasValidToken,
+      tasks: JSON.parse(page.tasks_json || '[]')
+    };
+  });
 }
 
 async function getStoredPageAccessToken(pageId) {
@@ -191,13 +198,60 @@ async function getStoredPageAccessToken(pageId) {
   return encrypted ? decryptToken(encrypted) : null;
 }
 
+async function addManualFacebookPage(userId, { pageId, pageName, category, link, pageToken }) {
+  await ensureSchema();
+  const cleanId = String(pageId || '').trim();
+  const configuredAppId = String(process.env.FACEBOOK_APP_ID || '').trim();
+  if (configuredAppId && cleanId === configuredAppId) {
+    throw new Error(`ID '${cleanId}' là Meta App ID (ID ứng dụng của bạn), KHÔNG PHẢI là Fanpage ID. Bạn không thể đăng bài lên App ID. Vui lòng nhập đúng ID Trang Facebook (ví dụ: Trang có ID 61594919461107).`);
+  }
+  const pool = await getPool();
+  const encryptedToken = pageToken ? encryptToken(pageToken) : encryptToken('manual_page_token_placeholder');
+  await pool.request()
+    .input('userId', sql.VarChar(64), String(userId))
+    .input('pageId', sql.VarChar(64), String(pageId).trim())
+    .input('pageName', sql.NVarChar(200), String(pageName || 'Fanpage ' + pageId).slice(0, 200))
+    .input('category', sql.NVarChar(200), category ? String(category).slice(0, 200) : 'Doanh nghiệp / Cộng đồng')
+    .input('link', sql.NVarChar(500), link ? String(link).slice(0, 500) : `https://facebook.com/${pageId}`)
+    .input('pageToken', sql.NVarChar(sql.MAX), encryptedToken)
+    .input('tasks', sql.NVarChar(sql.MAX), JSON.stringify(['MANAGE', 'CREATE_CONTENT', 'MODERATE']))
+    .query(`
+      UPDATE dbo.FacebookPages
+      SET page_name=@pageName, category=@category, page_link=@link, page_access_token_encrypted=@pageToken, tasks_json=@tasks, updated_at=SYSUTCDATETIME()
+      WHERE facebook_user_id=@userId AND page_id=@pageId;
+      IF @@ROWCOUNT=0
+        INSERT INTO dbo.FacebookPages (facebook_user_id, page_id, page_name, category, page_link, page_access_token_encrypted, tasks_json, updated_at)
+        VALUES (@userId, @pageId, @pageName, @category, @link, @pageToken, @tasks, SYSUTCDATETIME());
+    `);
+  return {
+    id: String(pageId).trim(),
+    name: String(pageName || 'Fanpage ' + pageId),
+    category: category || 'Doanh nghiệp / Cộng đồng',
+    link: link || `https://facebook.com/${pageId}`,
+    platform: 'facebook',
+    connected: true
+  };
+}
+
+async function removeConnectedPage(userId, pageId) {
+  await ensureSchema();
+  const pool = await getPool();
+  await pool.request()
+    .input('userId', sql.VarChar(64), String(userId))
+    .input('pageId', sql.VarChar(64), String(pageId))
+    .query('DELETE FROM dbo.FacebookPages WHERE facebook_user_id=@userId AND page_id=@pageId');
+  return true;
+}
+
 module.exports = {
+  addManualFacebookPage,
   decryptToken,
   encryptToken,
   ensureSchema,
   getConnectedPages,
   getStoredPageAccessToken,
   getStoredUserAccessToken,
+  removeConnectedPage,
   saveFacebookUser,
   syncFacebookPages
 };

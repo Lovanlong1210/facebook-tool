@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import MainLayout from '../../components/layout/MainLayout';
 import postApi from '../../services/postApi';
 import channelApi from '../../services/channelApi';
-import { CalendarClock, ChevronLeft, ChevronRight, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { CalendarClock, ChevronLeft, ChevronRight, RefreshCw, Send, Trash2, Pencil, X } from 'lucide-react';
+import RichPostEditor from '../../components/planner/RichPostEditor';
 
 export default function PostListPage() {
   const [posts, setPosts] = useState([]);
@@ -14,6 +15,13 @@ export default function PostListPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const pageSize = 10;
+
+  // State chỉnh sửa bài đăng
+  const [editingPost, setEditingPost] = useState(null);
+  const [editContent, setEditContent] = useState('');
+  const [editPageId, setEditPageId] = useState('');
+  const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const fetchPosts = useCallback(async () => {
     setLoading(true);
@@ -37,6 +45,46 @@ export default function PostListPage() {
   useEffect(() => {
     channelApi.list().then((result) => setChannels(result.channels || [])).catch(() => setChannels([]));
   }, []);
+
+  const handleOpenEdit = (post) => {
+    setEditingPost(post);
+    setEditContent(post.content || '');
+    setEditPageId(post.page_id || (channels[0]?.id || ''));
+    let dt = '';
+    if (post.scheduled_at) {
+      const d = new Date(post.scheduled_at);
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      dt = d.toISOString().slice(0, 16);
+    } else {
+      const d = new Date();
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      dt = d.toISOString().slice(0, 16);
+    }
+    setEditScheduledAt(dt);
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editContent.trim()) {
+      alert('Vui lòng nhập nội dung bài đăng.');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await postApi.updatePost(editingPost.id, {
+        content: editContent.trim(),
+        pageId: editPageId,
+        scheduledAt: editScheduledAt ? new Date(editScheduledAt).toISOString() : new Date().toISOString()
+      });
+      alert('Đã cập nhật bài đăng thành công và đưa vào trạng thái chờ đăng!');
+      setEditingPost(null);
+      fetchPosts();
+    } catch (err) {
+      alert('Lỗi cập nhật: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   // Hàm xử lý kích hoạt đăng ngay
   const handlePublishNow = async (id) => {
@@ -106,10 +154,28 @@ export default function PostListPage() {
                   <td>{post.page_id || 'Fanpage'}</td>
                   <td>{post.media_type || 'text'}</td>
                   <td><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><CalendarClock size={14} />{post.scheduled_at ? new Date(post.scheduled_at).toLocaleString('vi-VN') : 'Đăng ngay'}</span></td>
-                  <td>{renderStatusBadge(post.status)}</td>
+                  <td>
+                    {renderStatusBadge(post.status)}
+                    {post.status === 'failed' && post.error_message && (
+                      <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4, maxWidth: 240, lineHeight: 1.3 }} title={post.error_message}>
+                        ⚠️ {post.error_message.slice(0, 90)}{post.error_message.length > 90 ? '...' : ''}
+                      </div>
+                    )}
+                  </td>
                   <td><div className="table-tools">
-                    {['pending', 'failed'].includes(post.status) && <button className="button button-quiet" onClick={() => handlePublishNow(post.id)} type="button"><Send size={14} /> Đăng ngay</button>}
-                    {['pending', 'failed'].includes(post.status) && <button className="button button-danger" onClick={() => handleDelete(post.id)} type="button" aria-label={`Xóa bài ${post.id}`}><Trash2 size={14} /></button>}
+                    {['pending', 'failed'].includes(post.status) && (
+                      <>
+                        <button className="button button-quiet" onClick={() => handleOpenEdit(post)} type="button" title="Sửa bài viết">
+                          <Pencil size={14} /> Sửa
+                        </button>
+                        <button className="button button-quiet" onClick={() => handlePublishNow(post.id)} type="button">
+                          <Send size={14} /> Đăng ngay
+                        </button>
+                        <button className="button button-danger" onClick={() => handleDelete(post.id)} type="button" aria-label={`Xóa bài ${post.id}`}>
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
                   </div></td>
                 </tr>
               ))}
@@ -124,6 +190,105 @@ export default function PostListPage() {
           </div>
         </div>
       </section>
+
+      {/* Modal Chỉnh Sửa Bài Đăng */}
+      {editingPost && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'grid',
+          placeItems: 'center',
+          zIndex: 1000,
+          padding: 20
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 16,
+            width: '100%',
+            maxWidth: 540,
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '16px 20px',
+              borderBottom: '1px solid #f1f5f9'
+            }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Pencil size={18} color="#2563eb" />
+                <span>Chỉnh sửa bài đăng #{editingPost.id}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingPost(null)}
+                style={{ border: 0, background: 'transparent', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={18} color="#94a3b8" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEdit} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Nội dung bài đăng (Hỗ trợ Font & Emoji)</label>
+                <RichPostEditor
+                  value={editContent}
+                  onChange={setEditContent}
+                  placeholder="Nhập nội dung bài đăng..."
+                  rows={5}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Đăng lên Fanpage</label>
+                <select
+                  className="field"
+                  value={editPageId}
+                  onChange={(e) => setEditPageId(e.target.value)}
+                  style={{ width: '100%' }}
+                >
+                  {channels.map((ch) => (
+                    <option key={ch.id} value={ch.id}>
+                      {ch.name} (ID: {ch.id}) {ch.hasValidToken === false ? '⚠️ Thiếu Token' : '✅'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Lịch đăng (Ngày & Giờ)</label>
+                <input
+                  type="datetime-local"
+                  className="field"
+                  value={editScheduledAt}
+                  onChange={(e) => setEditScheduledAt(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => setEditingPost(null)}
+                  disabled={savingEdit}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={savingEdit}
+                >
+                  {savingEdit ? 'Đang lưu...' : 'Lưu thay đổi'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 }

@@ -5,11 +5,19 @@ const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
 
 async function getFacebookPageAccessToken(pageId) {
   const storedPageToken = await getStoredPageAccessToken(pageId);
-  if (storedPageToken) return storedPageToken;
+  if (storedPageToken && storedPageToken !== 'manual_page_token_placeholder') {
+    if (storedPageToken.length === 32 && /^[0-9a-fA-F]{32}$/.test(storedPageToken)) {
+      throw new Error(`Token của Trang [${pageId}] hiện đang là App Secret (32 ký tự), KHÔNG PHẢI Page Access Token. Vui lòng vào 'Kênh đã kết nối' dán mã Page Token bắt đầu bằng EAA...`);
+    }
+    return storedPageToken;
+  }
 
   const configuredToken = process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
   if (!configuredToken) {
-    throw new Error('Thiếu FACEBOOK_PAGE_ACCESS_TOKEN trong server/.env');
+    if (storedPageToken === 'manual_page_token_placeholder') {
+      throw new Error(`Fanpage [${pageId}] chưa có Page Access Token hợp lệ (đang là token placeholder). Vui lòng vào 'Kênh đã kết nối' để cập nhật Page Access Token thật hoặc đồng bộ từ Facebook.`);
+    }
+    throw new Error('Thiếu FACEBOOK_PAGE_ACCESS_TOKEN trong server/.env hoặc token Fanpage');
   }
 
   const identityResponse = await axios.get(

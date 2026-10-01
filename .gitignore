@@ -17,3 +17,4 @@ pnpm-debug.log*
 *.log
 .DS_Store
 Thumbs.db
+.running-pids.json

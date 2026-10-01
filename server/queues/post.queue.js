@@ -26,7 +26,13 @@ async function addPostToQueue(postId, scheduledAt) {
   await postQueue.add(
     'publish_main_post',
     { postId },
-    { jobId, delay: delayMs, removeOnComplete: true }
+    {
+      jobId,
+      delay: delayMs,
+      removeOnComplete: true,
+      removeOnFail: true,   // Tự xóa job thất bại khỏi Redis ngay lập tức
+      attempts: 1           // Không retry tự động — DB đã lưu trạng thái 'failed'
+    }
   );
 
   console.log(`[Queue SQL] Đã lên lịch cho Bài đăng ID (INT): ${postId} sau ${Math.round(delayMs / 1000)}s`);

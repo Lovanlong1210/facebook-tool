@@ -57,7 +57,11 @@ const postWorker = new Worker(
     if (claimResult.recordset.length === 0) return;
 
     try {
-      const pageId = post.page_id;
+      const pageId = String(post.page_id || '').trim();
+      const configuredAppId = String(process.env.FACEBOOK_APP_ID || '').trim();
+      if (configuredAppId && pageId === configuredAppId) {
+        throw new Error(`ID '${pageId}' là Meta App ID (ID ứng dụng), không phải Trang Facebook. Không thể đăng bài lên App ID. Vui lòng chọn Trang Facebook thật của bạn (ví dụ: Trang có ID '61594919461107').`);
+      }
       const pageAccessToken = await getFacebookPageAccessToken(pageId);
       const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
 
@@ -100,7 +104,7 @@ const postWorker = new Worker(
       await pool.request()
         .input('id', sql.Int, postId)
         .input('fbId', sql.NVarChar, fbPostId)
-        .query("UPDATE Posts SET status = 'published', facebook_post_id = @fbId WHERE id = @id");
+        .query("UPDATE Posts SET status = 'published', facebook_post_id = @fbId, error_message = NULL WHERE id = @id");
 
       for (const mediaLink of mediaLinks) {
         if (typeof mediaLink !== 'string' || !mediaLink.startsWith('local://')) continue;
@@ -127,10 +131,11 @@ const postWorker = new Worker(
       const errorMsg = err.response?.data?.error?.message || err.message;
       console.error(`❌ [FB ERROR] Đăng bài thất bại: ${errorMsg}`);
 
-      // Cập nhật trạng thái 'failed' trong SQL Server
+      // Cập nhật trạng thái 'failed' và lưu lỗi chi tiết vào SQL Server
       await pool.request()
         .input('id', sql.Int, postId)
-        .query("UPDATE Posts SET status = 'failed' WHERE id = @id");
+        .input('errorMsg', sql.NVarChar(sql.MAX), String(errorMsg || 'Lỗi không xác định khi đăng Facebook'))
+        .query("UPDATE Posts SET status = 'failed', error_message = @errorMsg WHERE id = @id");
 
       throw new Error(errorMsg);
     }

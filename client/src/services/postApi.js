@@ -1,49 +1,46 @@
 import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:5000/api';
+const client = axios.create({
+  baseURL: API_BASE_URL,
+  withCredentials: true
+});
 
 export const postApi = {
   getStats: async () => {
-    const response = await axios.get(`${API_BASE_URL}/posts/stats`);
+    const response = await client.get('/posts/stats');
     return response.data;
   },
 
-  getInsights: async (days = 14, pageId) => {
-    const response = await axios.get(`${API_BASE_URL}/reports/insights`, { params: { days, pageId } });
-    return response.data;
-  },
-
-  getWorkspaceReport: async () => {
-    const response = await axios.get(`${API_BASE_URL}/reports/workspace`);
+  getInsights: async (days = 14) => {
+    const response = await client.get('/reports/insights', { params: { days } });
     return response.data;
   },
 
   getChannels: async () => {
-    const response = await axios.get(`${API_BASE_URL}/channels`);
+    const response = await client.get('/channels');
     return response.data;
   },
 
   createPost: async (post) => {
-    const response = await axios.post(`${API_BASE_URL}/posts`, post);
+    const response = await client.post('/posts', post);
     return response.data;
   },
 
   uploadMedia: async (formData) => {
-    const response = await axios.post(`${API_BASE_URL}/media`, formData);
+    const response = await client.post('/media', formData);
     return response.data;
   },
 
-  // 1. Lấy danh sách bài đăng có bộ lọc & phân trang
   getPostsList: async ({ page = 1, limit = 10, status = 'all', pageId = 'all' } = {}) => {
-    const response = await axios.get(`${API_BASE_URL}/posts`, {
+    const response = await client.get('/posts', {
       params: { page, limit, status, pageId }
     });
     return response.data;
   },
 
-  // 2. Upload file Excel bài đăng
   bulkUpload: async (formData) => {
-    const response = await axios.post(`${API_BASE_URL}/posts/bulk-upload`, formData, {
+    const response = await client.post('/posts/bulk-upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
@@ -51,15 +48,18 @@ export const postApi = {
 
   templateUrl: `${API_BASE_URL}/posts/template`,
 
-  // 3. Kích hoạt đăng ngay cho 1 bài viết cụ thể
   triggerPostNow: async (postId) => {
-    const response = await axios.post(`${API_BASE_URL}/posts/${postId}/publish-now`);
+    const response = await client.post(`/posts/${postId}/publish-now`);
     return response.data;
   },
 
-  // 4. Xóa bài đăng khỏi hệ thống
   deletePost: async (postId) => {
-    const response = await axios.delete(`${API_BASE_URL}/posts/${postId}`);
+    const response = await client.delete(`/posts/${postId}`);
+    return response.data;
+  },
+
+  updatePost: async (postId, postData) => {
+    const response = await client.put(`/posts/${postId}`, postData);
     return response.data;
   }
 };

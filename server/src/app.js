@@ -14,7 +14,9 @@ const {
   saveFacebookUser,
   syncFacebookPages,
   getStoredUserAccessToken,
-  getConnectedPages
+  getConnectedPages,
+  addManualFacebookPage,
+  removeConnectedPage
 } = require('./utils/FacebookPageConnections');
 const {
   OAUTH_STATE_COOKIE,
@@ -33,20 +35,8 @@ const {
 } = require('./middlewares/auth');
 
 const app = express();
-const allowedClientOrigins = new Set(
-  (process.env.CLIENT_ORIGIN || 'http://localhost:3001,http://localhost:3000')
-    .split(',')
-    .map((origin) => origin.trim())
-    .concat(['http://localhost:3001', 'http://localhost:3000'])
-);
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedClientOrigins.has(origin.replace(/\/$/, ''))) {
-      callback(null, true);
-      return;
-    }
-    callback(new Error('Origin not allowed by CORS'));
-  },
+  origin: true,
   credentials: true
 }));
 app.use(express.json({ limit: '2mb' }));
@@ -98,6 +88,8 @@ async function ensurePostOwnershipSchema() {
     postOwnershipSchema = getPool().then((pool) => pool.request().query(`
       IF COL_LENGTH('dbo.Posts', 'created_by_user_id') IS NULL
         ALTER TABLE dbo.Posts ADD created_by_user_id varchar(64) NULL;
+      IF COL_LENGTH('dbo.Posts', 'error_message') IS NULL
+        ALTER TABLE dbo.Posts ADD error_message nvarchar(max) NULL;
       IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_Posts_created_by_user_id' AND object_id=OBJECT_ID('dbo.Posts'))
         CREATE INDEX IX_Posts_created_by_user_id ON dbo.Posts(created_by_user_id, scheduled_at DESC);
     `)).catch((error) => {
@@ -137,12 +129,15 @@ app.get('/api/auth/facebook', (req, res) => {
 
   const state = crypto.randomBytes(32).toString('base64url');
   setCookie(req, res, OAUTH_STATE_COOKIE, state, 10 * 60);
-  const graphVersion = process.env.FB_LOGIN_GRAPH_VERSION || process.env.FB_GRAPH_VERSION || 'v26.0';
+  const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
   const authorizationUrl = new URL(`https://www.facebook.com/${graphVersion}/dialog/oauth`);
   authorizationUrl.searchParams.set('client_id', process.env.FACEBOOK_APP_ID);
   authorizationUrl.searchParams.set('redirect_uri', facebookRedirectUri());
   authorizationUrl.searchParams.set('response_type', 'code');
-  authorizationUrl.searchParams.set('scope', process.env.FACEBOOK_LOGIN_SCOPES || 'public_profile,pages_show_list,pages_read_engagement,pages_manage_posts');
+  // Chỉ dùng public_profile để tránh lỗi Invalid Scopes.
+  // Các quyền pages_* cần được bật trước trong Facebook Developer Console.
+  const configuredScopes = process.env.FACEBOOK_LOGIN_SCOPES || 'public_profile';
+  authorizationUrl.searchParams.set('scope', configuredScopes);
   authorizationUrl.searchParams.set('state', state);
   return res.redirect(302, authorizationUrl.toString());
 });
@@ -160,7 +155,7 @@ app.get('/api/auth/facebook/callback', async (req, res) => {
   }
 
   try {
-    const graphVersion = process.env.FB_LOGIN_GRAPH_VERSION || process.env.FB_GRAPH_VERSION || 'v26.0';
+    const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
     const shortTokenResponse = await axios.get(`https://graph.facebook.com/${graphVersion}/oauth/access_token`, {
       params: {
         client_id: process.env.FACEBOOK_APP_ID,
@@ -192,17 +187,16 @@ app.get('/api/auth/facebook/callback', async (req, res) => {
       timeout: 15000
     });
     await saveFacebookUser(profileResponse.data, userAccessToken, tokenExpiresIn);
-    try {
-      const connectedPages = await syncFacebookPages(profileResponse.data.id, userAccessToken);
-      console.log(`[Facebook OAuth] Connected ${connectedPages.length} Page(s) for user ${profileResponse.data.id}.`);
-    } catch (pageSyncError) {
-      console.warn('[Facebook OAuth] Login succeeded; Page sync unavailable:', pageSyncError.response?.data?.error?.message || pageSyncError.message);
-    }
+    const connectedPages = await syncFacebookPages(profileResponse.data.id, userAccessToken);
+    console.log(`[Facebook OAuth] Connected ${connectedPages.length} Page(s) for user ${profileResponse.data.id}.`);
     setCookie(req, res, SESSION_COOKIE, signSession(profileResponse.data), SESSION_TTL_SECONDS);
     return res.redirect(`${clientOrigin()}/dashboard`);
   } catch (error) {
-    console.error('[Facebook OAuth Error]', error.response?.status || error.message);
-    return res.redirect(`${clientOrigin()}/login?error=oauth_failed`);
+    const fbError = error.response?.data?.error;
+    const errorMsg = fbError?.message || error.message;
+    console.error('[Facebook OAuth Error]', error.response?.data || error.response?.status || error.message);
+    const reason = (errorMsg.includes('client secret') || fbError?.code === 1) ? 'invalid_client_secret' : 'oauth_failed';
+    return res.redirect(`${clientOrigin()}/login?error=${reason}&msg=${encodeURIComponent(errorMsg)}`);
   }
 });
 
@@ -210,6 +204,112 @@ app.post('/api/auth/logout', (_req, res) => {
   clearCookie(_req, res, SESSION_COOKIE);
   clearCookie(_req, res, OAUTH_STATE_COOKIE);
   return res.json({ success: true });
+});
+
+app.post('/api/auth/facebook-token', async (req, res) => {
+  const token = typeof req.body.token === 'string' ? req.body.token.trim() : '';
+  if (!token) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập Facebook Access Token hoặc Cookie của bạn.' });
+  }
+
+  // 1. Kiểm tra nếu người dùng dán Cookie Facebook (có chứa c_user)
+  const cUserMatch = token.match(/c_user=([0-9]+)/);
+  if (cUserMatch && !token.startsWith('EAA')) {
+    const fbId = cUserMatch[1];
+    const profile = { id: fbId, name: `FB Account (${fbId})` };
+    saveFacebookUser(profile, token, 60 * 86400 * 60).catch(() => {});
+    setCookie(req, res, SESSION_COOKIE, signSession(profile), SESSION_TTL_SECONDS);
+    return res.json({
+      success: true,
+      user: profile,
+      message: `Đăng nhập thành công từ Cookie Facebook (UID: ${fbId})`
+    });
+  }
+
+  // 2. Nếu là Access Token Facebook
+  try {
+    const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
+    const profileResponse = await axios.get(`https://graph.facebook.com/${graphVersion}/me`, {
+      params: { fields: 'id,name,picture.type(large)', access_token: token },
+      timeout: 6000
+    });
+    const profile = profileResponse.data;
+
+    // Lưu user và đồng bộ pages ở background (không chặn kết quả trả về)
+    saveFacebookUser(profile, token, 60 * 86400 * 60).catch((saveErr) => {
+      console.warn('[Facebook Token Login] DB save warning:', saveErr.message);
+    });
+
+    syncFacebookPages(profile.id, token).catch((pageErr) => {
+      console.warn('[Facebook Token Login] Page sync warning:', pageErr.message);
+    });
+
+    setCookie(req, res, SESSION_COOKIE, signSession(profile), SESSION_TTL_SECONDS);
+    return res.json({
+      success: true,
+      user: {
+        id: profile.id,
+        name: profile.name,
+        picture: profile.picture?.data?.url
+      },
+      message: `Kết nối thành công với tài khoản Facebook: ${profile.name}`
+    });
+  } catch (error) {
+    console.error('[Facebook Token Login]', error.response?.data || error.message);
+    const fbMsg = error.response?.data?.error?.message;
+    return res.status(400).json({
+      success: false,
+      message: fbMsg
+        ? `Lỗi từ Facebook: ${fbMsg}`
+        : 'Mã Access Token không hợp lệ hoặc đã hết hạn. Bạn có thể chuyển qua tab "Đăng nhập Nhanh" để vào ngay lập tức.'
+    });
+  }
+});
+
+app.post('/api/auth/facebook-direct', async (req, res) => {
+  const fbId = typeof req.body.id === 'string' ? req.body.id.trim() : '';
+  const fbName = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+  if (!fbId || !fbName) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập Facebook ID và Tên của bạn.' });
+  }
+
+  const user = { id: fbId, name: fbName };
+  saveFacebookUser(user, '', null).catch((err) => {
+    console.warn('[Direct Login] DB save note:', err.message);
+  });
+
+  setCookie(req, res, SESSION_COOKIE, signSession(user), SESSION_TTL_SECONDS);
+  return res.json({ success: true, user, message: `Đã kết nối tài khoản Facebook: ${fbName}` });
+});
+
+app.post('/api/auth/save-meta-config', (req, res) => {
+  const appId = typeof req.body.appId === 'string' ? req.body.appId.trim() : '';
+  const appSecret = typeof req.body.appSecret === 'string' ? req.body.appSecret.trim() : '';
+
+  if (!appId || !/^\d+$/.test(appId)) {
+    return res.status(400).json({ success: false, message: 'App ID phải là dãy số hợp lệ từ developers.facebook.com.' });
+  }
+  if (!appSecret || appSecret.length < 8) {
+    return res.status(400).json({ success: false, message: 'App Secret không hợp lệ (chuỗi bí mật từ Meta developers).' });
+  }
+
+  process.env.FACEBOOK_APP_ID = appId;
+  process.env.FACEBOOK_APP_SECRET = appSecret;
+
+  try {
+    const envPath = path.resolve(__dirname, '../.env');
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    envContent = envContent.replace(/^FACEBOOK_APP_ID=.*/m, `FACEBOOK_APP_ID=${appId}`);
+    envContent = envContent.replace(/^FACEBOOK_APP_SECRET=.*/m, `FACEBOOK_APP_SECRET=${appSecret}`);
+    fs.writeFileSync(envPath, envContent, 'utf8');
+  } catch (fsErr) {
+    console.warn('[Save Meta Config] Warning updating .env file:', fsErr.message);
+  }
+
+  return res.json({
+    success: true,
+    message: 'Đã lưu App ID và Secret thành công! Bạn có thể sử dụng Meta Login ngay.'
+  });
 });
 
 app.post('/api/media', requireAuth, handleMediaUpload, (req, res) => {
@@ -258,13 +358,390 @@ app.post('/api/ai/chat', requireAuth, async (req, res) => {
 app.get('/api/channels', requireAuth, async (req, res) => {
   try {
     const userToken = await getStoredUserAccessToken(req.user.sub);
-    if (!userToken) {
-      return res.status(409).json({ success: false, message: 'Phiên Facebook chưa có token Page. Hãy đăng xuất rồi đăng nhập lại để đồng bộ Page.' });
+    let channels = [];
+    if (userToken) {
+      try {
+        channels = await syncFacebookPages(req.user.sub, userToken);
+      } catch (syncErr) {
+        console.warn('[Facebook Page Sync Warning]', syncErr.message);
+        channels = await getConnectedPages(req.user.sub);
+      }
+    } else {
+      channels = await getConnectedPages(req.user.sub);
     }
-    const channels = await syncFacebookPages(req.user.sub, userToken);
     return res.json({ success: true, channels });
   } catch (error) {
-    return sendApiError(res, 'Channels Error', error, 'Không thể đồng bộ Page từ Facebook. Kiểm tra quyền pages_show_list và pages_read_engagement.');
+    console.error('[Channels Error]', error.message);
+    try {
+      const fallbackPages = await getConnectedPages(req.user.sub);
+      return res.json({ success: true, channels: fallbackPages });
+    } catch {
+      return res.json({ success: true, channels: [] });
+    }
+  }
+});
+
+app.post('/api/channels/sync', requireAuth, async (req, res) => {
+  try {
+    const userToken = await getStoredUserAccessToken(req.user.sub);
+    if (!userToken) {
+      const existing = await getConnectedPages(req.user.sub);
+      return res.json({
+        success: true,
+        channels: existing,
+        message: 'Tài khoản chưa có token Facebook trực tiếp. Đang hiển thị danh sách Page đã lưu.'
+      });
+    }
+    const channels = await syncFacebookPages(req.user.sub, userToken);
+    return res.json({
+      success: true,
+      channels,
+      message: `Đồng bộ thành công ${channels.length} Fanpage từ Facebook.`
+    });
+  } catch (error) {
+    console.error('[Channels Sync Error]', error.message);
+    const existing = await getConnectedPages(req.user.sub).catch(() => []);
+    return res.json({
+      success: true,
+      channels: existing,
+      warning: 'Facebook chưa cấp quyền hoặc phiên đã hết hạn. Đang hiển thị kênh đã kết nối.'
+    });
+  }
+});
+
+app.post('/api/channels/add', requireAuth, async (req, res) => {
+  const pageId = typeof req.body.pageId === 'string' ? req.body.pageId.trim() : '';
+  const pageName = typeof req.body.pageName === 'string' ? req.body.pageName.trim() : '';
+  const category = typeof req.body.category === 'string' ? req.body.category.trim() : '';
+  const link = typeof req.body.link === 'string' ? req.body.link.trim() : '';
+  const pageToken = typeof req.body.pageToken === 'string' ? req.body.pageToken.trim() : '';
+
+  if (!pageId) {
+    return res.status(400).json({ success: false, message: 'Vui lòng cung cấp Page ID hoặc UID của Fanpage.' });
+  }
+
+  try {
+    const page = await addManualFacebookPage(req.user.sub, {
+      pageId,
+      pageName: pageName || `Fanpage (${pageId})`,
+      category: category || 'Fanpage Facebook',
+      link: link || `https://facebook.com/${pageId}`,
+      pageToken
+    });
+    return res.json({
+      success: true,
+      page,
+      message: `Đã kết nối Fanpage "${page.name}" thành công!`
+    });
+  } catch (err) {
+    console.error('[Add Channel Error]', err.message);
+    return res.status(500).json({ success: false, message: 'Không thể thêm Fanpage. ' + err.message });
+  }
+});
+
+app.delete('/api/channels/:pageId', requireAuth, async (req, res) => {
+  const pageId = req.params.pageId;
+  try {
+    await removeConnectedPage(req.user.sub, pageId);
+    return res.json({ success: true, message: 'Đã hủy kết nối Fanpage thành công.' });
+  } catch (err) {
+    console.error('[Delete Channel Error]', err.message);
+    return res.status(500).json({ success: false, message: 'Không thể xóa Fanpage.' });
+  }
+});
+
+// Cập nhật Page Access Token cho Fanpage đã kết nối
+app.put('/api/channels/:pageId/token', requireAuth, async (req, res) => {
+  const pageId = String(req.params.pageId || '').trim();
+  let pageToken = typeof req.body.pageToken === 'string' ? req.body.pageToken.trim() : '';
+  if (!pageToken || pageToken.length < 15) {
+    return res.status(400).json({ success: false, message: 'Page Access Token không hợp lệ (chuỗi token Facebook bắt đầu bằng EAA... và dài trên 20 ký tự).' });
+  }
+
+  if (pageToken.includes('@') && pageToken.length < 40) {
+    return res.status(400).json({
+      success: false,
+      message: 'Mã bạn vừa nhập giống mật khẩu cá nhân, KHÔNG PHẢI Access Token. Token Facebook là một chuỗi dài bắt đầu bằng EAA...'
+    });
+  }
+
+  // Chặn nếu người dùng dán App Secret (chuỗi 32 ký tự hex) thay vì Page Access Token
+  if (pageToken.length === 32 && /^[0-9a-fA-F]{32}$/.test(pageToken)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Chuỗi bạn vừa nhập là App Secret (Khóa bí mật ứng dụng Meta gồm 32 ký tự), KHÔNG PHẢI là Page Access Token! Page Access Token là mã dài trên 100 ký tự bắt đầu bằng EAA... lấy từ Graph API Explorer.'
+    });
+  }
+
+  const configuredAppId = String(process.env.FACEBOOK_APP_ID || '').trim();
+  if (configuredAppId && pageId === configuredAppId) {
+    return res.status(400).json({
+      success: false,
+      message: `ID ${pageId} là Meta App ID (ID ứng dụng), không phải Fanpage. Bạn không thể gán token hay đăng bài lên App ID.`
+    });
+  }
+
+  const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
+  let verifiedPageName = '';
+
+  // 1. Thử kiểm tra trực tiếp xem token có phải là Page Token hợp lệ không
+  try {
+    const testResponse = await axios.get(`https://graph.facebook.com/${graphVersion}/${pageId}`, {
+      params: { fields: 'id,name', access_token: pageToken },
+      timeout: 8000
+    });
+    verifiedPageName = testResponse.data.name;
+    console.log(`[Token Verify] Token hợp lệ trực tiếp cho Fanpage: ${testResponse.data.name} (${testResponse.data.id})`);
+  } catch (verifyErr) {
+    // 2. Nếu không gọi trực tiếp được, kiểm tra xem có phải người dùng dán User Token không
+    try {
+      const meRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me`, {
+        params: { fields: 'id,name', access_token: pageToken },
+        timeout: 8000
+      });
+
+      // Nếu là User Token, thử lấy Page Token từ /me/accounts
+      const accountsRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me/accounts`, {
+        params: { fields: 'id,name,access_token', access_token: pageToken },
+        timeout: 8000
+      });
+
+      const matchedAccount = (accountsRes.data.data || []).find((acc) => String(acc.id) === String(pageId));
+      if (matchedAccount?.access_token) {
+        pageToken = matchedAccount.access_token;
+        verifiedPageName = matchedAccount.name;
+        console.log(`[Token Verify] Đã tự động đổi sang Page Access Token cho Trang: ${matchedAccount.name}`);
+      } else {
+        // Kiểm tra quyền của User Token này để báo lỗi chính xác
+        const permRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me/permissions`, {
+          params: { access_token: pageToken },
+          timeout: 5000
+        }).catch(() => ({ data: { data: [] } }));
+        const grantedPerms = (permRes.data?.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
+
+        return res.status(400).json({
+          success: false,
+          message: `Mã token bạn dán là User Token của tài khoản "${meRes.data.name}" và chỉ có quyền [${grantedPerms.join(', ') || 'public_profile'}]. Nó thiếu quyền quản lý Fanpage này. Trong Graph API Explorer, hãy bấm vào ô "User or Page" -> chọn trực tiếp Trang Facebook của bạn để copy Page Access Token!`
+        });
+      }
+    } catch {
+      const fbMsg = verifyErr.response?.data?.error?.message || verifyErr.message;
+      return res.status(400).json({
+        success: false,
+        message: `Facebook từ chối token: "${fbMsg}". Vui lòng chọn Trang trong Graph API Explorer để lấy Page Access Token.`
+      });
+    }
+  }
+
+  try {
+    const pages = await getConnectedPages(req.user.sub);
+    const page = pages.find((p) => String(p.id) === String(pageId));
+    await addManualFacebookPage(req.user.sub, {
+      pageId,
+      pageName: verifiedPageName || page?.name || ('Fanpage ' + pageId),
+      category: page?.category || 'Bán hàng / Dịch vụ',
+      link: page?.link || `https://facebook.com/${pageId}`,
+      pageToken
+    });
+    return res.json({ success: true, message: `Đã cập nhật Page Access Token thành công cho Trang "${verifiedPageName || pageId}"!` });
+  } catch (err) {
+    console.error('[Update Token Error]', err.message);
+    return res.status(500).json({ success: false, message: 'Không thể cập nhật token: ' + err.message });
+  }
+});
+
+// Endpoint kiểm tra Token Facebook có hợp lệ không
+app.post('/api/channels/verify-token', requireAuth, async (req, res) => {
+  const token = typeof req.body.token === 'string' ? req.body.token.trim() : '';
+  const pageId = typeof req.body.pageId === 'string' ? req.body.pageId.trim() : '';
+
+  if (!token) {
+    return res.status(400).json({ success: false, message: 'Vui lòng cung cấp Access Token để kiểm tra.' });
+  }
+
+  if (token.includes('@') && token.length < 40) {
+    return res.status(400).json({
+      success: false,
+      message: 'Mã bạn vừa nhập giống mật khẩu cá nhân, KHÔNG PHẢI Access Token. Token Facebook bắt đầu bằng EAA...'
+    });
+  }
+
+  const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
+  try {
+    // 1. Kiểm tra /me chỉ với fields: 'id,name' (tránh lỗi nonexisting field category)
+    const meRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me`, {
+      params: { fields: 'id,name', access_token: token },
+      timeout: 8000
+    });
+
+    // 2. Nếu có pageId, thử kiểm tra xem token có quyền trên pageId không
+    if (pageId) {
+      try {
+        const pageRes = await axios.get(`https://graph.facebook.com/${graphVersion}/${pageId}`, {
+          params: { fields: 'id,name', access_token: token },
+          timeout: 8000
+        });
+        return res.json({
+          success: true,
+          valid: true,
+          message: `✅ Token hợp lệ cho Trang: "${pageRes.data.name}" (ID: ${pageRes.data.id})`
+        });
+      } catch (pageErr) {
+        // Token không thể đọc pageId trực tiếp. Thử kiểm tra me/accounts
+        try {
+          const accRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me/accounts`, {
+            params: { fields: 'id,name,access_token', access_token: token },
+            timeout: 8000
+          });
+          const match = (accRes.data.data || []).find((a) => String(a.id) === String(pageId));
+          if (match) {
+            return res.json({
+              success: true,
+              valid: true,
+              message: `✅ Token tài khoản của bạn quản lý Trang: "${match.name}". Khi bấm "Lưu Token", hệ thống sẽ tự động gán token chuẩn!`
+            });
+          }
+        } catch {}
+
+        // Kiểm tra quyền để thông báo chính xác
+        const permRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me/permissions`, {
+          params: { access_token: token },
+          timeout: 5000
+        }).catch(() => ({ data: { data: [] } }));
+        const granted = (permRes.data?.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
+
+        return res.status(400).json({
+          success: false,
+          valid: false,
+          message: `Token này là User Token của "${meRes.data.name}" (quyền: ${granted.join(', ') || 'public_profile'}). Nó chưa có quyền trên Trang này. Trong Graph API Explorer, hãy chọn mục "User or Page" -> chọn Fanpage của bạn để copy Page Access Token!`
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      valid: true,
+      entity: meRes.data,
+      message: `Token hợp lệ cho: ${meRes.data.name} (ID: ${meRes.data.id})`
+    });
+  } catch (err) {
+    const fbMsg = err.response?.data?.error?.message || err.message;
+    return res.status(400).json({
+      success: false,
+      valid: false,
+      message: `Facebook báo lỗi: ${fbMsg}`
+    });
+  }
+});
+
+// Endpoint đồng bộ Fanpage bằng Token (từ Graph API Explorer)
+app.post('/api/channels/sync-with-token', requireAuth, async (req, res) => {
+  const token = typeof req.body.token === 'string' ? req.body.token.trim() : '';
+  if (!token || token.length < 20) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập Token Facebook hợp lệ (chuỗi dài bắt đầu bằng EAA...).' });
+  }
+
+  const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
+  const appId = process.env.FACEBOOK_APP_ID;
+  const appSecret = process.env.FACEBOOK_APP_SECRET;
+
+  try {
+    // 1. Kiểm tra loại token qua debug_token của Facebook
+    let debugData = null;
+    if (appId && appSecret) {
+      try {
+        const debugRes = await axios.get(`https://graph.facebook.com/${graphVersion}/debug_token`, {
+          params: { input_token: token, access_token: `${appId}|${appSecret}` },
+          timeout: 8000
+        });
+        debugData = debugRes.data?.data;
+        console.log('[Sync With Token] debug_token:', debugData?.type, debugData?.profile_id);
+      } catch (debugErr) {
+        console.warn('[Sync With Token] debug_token warning:', debugErr.message);
+      }
+    }
+
+    if (debugData && debugData.is_valid === false) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mã Token này không hợp lệ hoặc đã hết hạn. Vui lòng bấm "Generate Access Token" trong Graph API Explorer để tạo mã mới.'
+      });
+    }
+
+    if (debugData && debugData.type === 'APP') {
+      return res.status(400).json({
+        success: false,
+        message: 'Bạn đang chọn "App Token" (Mã ứng dụng), mã này không thể dùng để đăng bài lên Trang. Trong Graph API Explorer, tại ô "User or Page", vui lòng chọn Trang Facebook của bạn hoặc chọn "User Token"!'
+      });
+    }
+
+    // 2. Nếu là PAGE TOKEN (xác định qua debug_token hoặc fallback)
+    if (debugData && debugData.type === 'PAGE') {
+      const pageId = String(debugData.profile_id);
+      let pageName = `Fanpage ${pageId}`;
+      let pageCategory = 'Doanh nghiệp / Cộng đồng';
+      let pageLink = `https://facebook.com/${pageId}`;
+      try {
+        const pageInfo = await axios.get(`https://graph.facebook.com/${graphVersion}/${pageId}`, {
+          params: { fields: 'name,category,link', access_token: token },
+          timeout: 6000
+        });
+        if (pageInfo.data?.name) pageName = pageInfo.data.name;
+        if (pageInfo.data?.category) pageCategory = pageInfo.data.category;
+        if (pageInfo.data?.link) pageLink = pageInfo.data.link;
+      } catch {}
+
+      await addManualFacebookPage(req.user.sub, {
+        pageId,
+        pageName,
+        category: pageCategory,
+        link: pageLink,
+        pageToken: token
+      });
+      const updated = await getConnectedPages(req.user.sub);
+      return res.json({
+        success: true,
+        type: 'page',
+        message: `Đã kết nối thành công Fanpage "${pageName}" với Page Access Token!`,
+        channels: updated
+      });
+    }
+
+    // 3. Nếu là USER TOKEN (hoặc không lấy được debug_token), gọi /me
+    const meRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me`, {
+      params: { fields: 'id,name', access_token: token },
+      timeout: 8000
+    });
+
+    // Thử lấy danh sách Trang từ /me/accounts
+    const accountsRes = await axios.get(`https://graph.facebook.com/${graphVersion}/me/accounts`, {
+      params: { fields: 'id,name,category,link,access_token,tasks', limit: 100, access_token: token },
+      timeout: 15000
+    });
+
+    const pages = accountsRes.data.data || [];
+    if (pages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Token của "${meRes.data.name}" không tìm thấy Fanpage nào. Trong Graph API Explorer, bạn hãy bấm vào ô "User or Page", chọn trực tiếp Trang Facebook của bạn ở mục Page Access Tokens!`
+      });
+    }
+
+    // Đồng bộ vào DB
+    const updated = await syncFacebookPages(req.user.sub, token);
+    return res.json({
+      success: true,
+      type: 'user',
+      message: `Đã đồng bộ thành công ${pages.length} Fanpage với đầy đủ Page Token!`,
+      channels: updated
+    });
+  } catch (err) {
+    console.error('[Sync With Token Error]', err.response?.data || err.message);
+    const fbMsg = err.response?.data?.error?.message || err.message;
+    return res.status(400).json({
+      success: false,
+      message: `Lỗi từ Facebook: ${fbMsg}`
+    });
   }
 });
 
@@ -405,65 +882,10 @@ app.get('/api/posts/stats', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/reports/workspace', requireAuth, async (req, res) => {
-  try {
-    await ensurePostOwnershipSchema();
-    const pages = await getConnectedPages(req.user.sub).catch(() => []);
-    const pool = await getPool();
-    const request = pool.request();
-    const where = req.user.role === 'admin' ? '' : 'WHERE created_by_user_id=@ownerId';
-    if (req.user.role !== 'admin') request.input('ownerId', sql.VarChar(64), req.user.sub);
-    const result = await request.query(`SELECT page_id,media_type,status,created_by_user_id,COUNT(*) AS total FROM Posts ${where} GROUP BY page_id,media_type,status,created_by_user_id;`);
-    const pageNames = new Map(pages.map((page) => [String(page.id), page.name]));
-    const channelMap = new Map();
-    const accountMap = new Map();
-    const contentTypes = { text: 0, image: 0, video: 0 };
-    for (const row of result.recordset) {
-      const pageId = String(row.page_id || 'unassigned');
-      const mediaType = ['text', 'image', 'video'].includes(String(row.media_type).toLowerCase()) ? String(row.media_type).toLowerCase() : 'text';
-      const total = Number(row.total || 0);
-      const channel = channelMap.get(pageId) || { pageId, pageName: pageNames.get(pageId) || pageId, total: 0, published: 0, pending: 0, failed: 0 };
-      channel.total += total;
-      if (row.status === 'published') channel.published += total;
-      if (row.status === 'pending') channel.pending += total;
-      if (row.status === 'failed') channel.failed += total;
-      channelMap.set(pageId, channel);
-      contentTypes[mediaType] += total;
-
-      const accountId = String(row.created_by_user_id || 'unassigned');
-      const account = accountMap.get(accountId) || {
-        accountId,
-        accountName: accountId === String(req.user.sub) ? req.user.name : `Tài khoản ${accountId}`,
-        total: 0,
-        published: 0,
-        pending: 0,
-        failed: 0,
-        contentTypes: { text: 0, image: 0, video: 0 }
-      };
-      account.total += total;
-      account.contentTypes[mediaType] += total;
-      if (row.status === 'published') account.published += total;
-      if (row.status === 'pending') account.pending += total;
-      if (row.status === 'failed') account.failed += total;
-      accountMap.set(accountId, account);
-    }
-    return res.json({
-      success: true,
-      channels: [...channelMap.values()].sort((left, right) => right.total - left.total),
-      accounts: [...accountMap.values()].sort((left, right) => right.total - left.total),
-      contentTypes
-    });
-  } catch (error) {
-    console.error('[Workspace Report Error]', error.message);
-    return res.status(500).json({ success: false, message: 'Không thể tải phân tích nội dung workspace.' });
-  }
-});
-
 app.get('/api/reports/insights', requireAuth, async (req, res) => {
   let pageId = req.query.pageId ? String(req.query.pageId) : '';
-  let pages = [];
   try {
-    pages = await getConnectedPages(req.user.sub);
+    const pages = await getConnectedPages(req.user.sub);
     pageId = pageId || pages[0]?.id;
     if (!pageId) return res.status(409).json({ success: false, available: false, message: 'Tài khoản chưa có Fanpage đã kết nối.' });
     if (!pages.some((page) => String(page.id) === pageId)) return res.status(403).json({ success: false, available: false, message: 'Không có quyền xem Insights của Fanpage này.' });
@@ -476,78 +898,15 @@ app.get('/api/reports/insights', requireAuth, async (req, res) => {
   const since = new Date(until.getTime() - days * 86400000);
   try {
     const token = await getFacebookPageAccessToken(pageId);
-    const version = process.env.FB_INSIGHTS_GRAPH_VERSION || 'v26.0';
-    const names = (process.env.FB_INSIGHT_METRICS || 'page_views_total,page_media_view,page_total_media_view_unique,page_post_engagements,page_video_views,page_video_view_time,page_follows,page_daily_follows_unique,page_fan_adds_by_paid_non_paid_unique,page_actions_post_reactions_total,page_follows_city,page_follows_country').split(',').map((value) => value.trim()).filter(Boolean);
+    const version = process.env.FB_GRAPH_VERSION || 'v19.0';
+    const names = (process.env.FB_INSIGHT_METRICS || 'page_post_engagements,page_views_total,page_media_view').split(',').map((value) => value.trim()).filter(Boolean);
     const result = await axios.get(`https://graph.facebook.com/${version}/${pageId}/insights`, {
       params: { metric: names.join(','), period: 'day', since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10), access_token: token },
       timeout: 15000
     });
     const metrics = (result.data.data || []).map((metric) => ({ name: metric.name, period: metric.period, values: (metric.values || []).map((item) => ({ endTime: item.end_time, value: item.value })) }));
     const available = metrics.some((metric) => metric.values.length > 0);
-    const page = pages.find((item) => String(item.id) === pageId);
-    let breakdowns = { ads: [], followers: [] };
-    const pageViews = metrics.find((metric) => metric.name === 'page_media_view');
-    if (pageViews?.values.length) {
-      const fetchBreakdown = async (breakdown) => {
-        try {
-          const response = await axios.get(`https://graph.facebook.com/${version}/${pageId}/insights`, {
-            params: { metric: 'page_media_view', period: 'day', since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10), breakdown, access_token: token },
-            timeout: 15000
-          });
-          return (response.data.data?.[0]?.values || []).map((item) => ({ endTime: item.end_time, value: item.value }));
-        } catch (error) {
-          console.warn(`[Insights Breakdown Error] ${breakdown}:`, error.response?.data?.error?.message || error.message);
-          return [];
-        }
-      };
-      const [ads, followers] = await Promise.all([fetchBreakdown('is_from_ads'), fetchBreakdown('is_from_followers')]);
-      breakdowns = { ads, followers };
-    }
-    let fanCount = null;
-    let followersCount = null;
-    try {
-      const pageDetails = await axios.get(`https://graph.facebook.com/${version}/${pageId}`, {
-        params: { fields: 'fan_count,followers_count', access_token: token },
-        timeout: 10000
-      });
-      const fans = Number(pageDetails.data.fan_count);
-      const followers = Number(pageDetails.data.followers_count);
-      if (Number.isFinite(fans)) fanCount = fans;
-      if (Number.isFinite(followers)) followersCount = followers;
-    } catch {}
-    const message = available
-      ? null
-      : fanCount !== null && fanCount < 100
-        ? `Page này có ${fanCount} lượt thích; Meta yêu cầu ít nhất 100 lượt thích để cung cấp Page Insights.`
-        : 'Meta chưa có dữ liệu trong kỳ. Dữ liệu thường cập nhật mỗi 24 giờ; nếu Page đã đủ điều kiện, hãy kiểm tra quyền Page Insights và trạng thái App Review trong Meta for Developers.';
-    const findMetric = (name) => metrics.find((metric) => metric.name === name);
-    const latestBreakdown = (name) => {
-      const values = findMetric(name)?.values || [];
-      const value = values[values.length - 1]?.value;
-      if (Array.isArray(value)) {
-        return value.map((item) => ({ name: String(item.name || item.key || item.label || 'Khác'), value: Number(item.value) || 0 }));
-      }
-      if (value && typeof value === 'object') {
-        return Object.entries(value).map(([label, count]) => ({
-          name: label,
-          value: Number(count && typeof count === 'object' ? count.value : count) || 0
-        }));
-      }
-      return [];
-    };
-    return res.json({
-      success: true,
-      available,
-      days,
-      page: { id: pageId, name: page?.name || pageId, fanCount, followersCount },
-      metrics,
-      breakdowns,
-      demographics: {
-        cities: latestBreakdown('page_follows_city').sort((left, right) => right.value - left.value),
-        countries: latestBreakdown('page_follows_country').sort((left, right) => right.value - left.value)
-      },
-      message
-    });
+    return res.json({ success: true, available, days, metrics, message: available ? null : 'Facebook chưa trả datapoint Insights cho Page này trong khoảng thời gian đã chọn.' });
   } catch (error) {
     return sendApiError(res, 'Insights Error', error, 'Không tải được Facebook Insights.');
   }
@@ -605,6 +964,63 @@ app.delete('/api/posts/:postId', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('[Delete Post Error]', error.message);
     return res.status(500).json({ success: false, message: 'Không thể xóa bài đăng.' });
+  }
+});
+
+// Chỉnh sửa bài đăng (chỉ sửa khi bài ở trạng thái pending hoặc failed)
+app.put('/api/posts/:postId', requireAuth, async (req, res) => {
+  const postId = Number.parseInt(req.params.postId, 10);
+  if (!Number.isSafeInteger(postId) || postId <= 0) return res.status(400).json({ success: false, message: 'ID bài đăng không hợp lệ.' });
+
+  const { content, pageId, scheduledAt, mediaType } = req.body;
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    return res.status(400).json({ success: false, message: 'Nội dung bài đăng không được để trống.' });
+  }
+
+  try {
+    await ensurePostOwnershipSchema();
+    const pool = await getPool();
+    const result = await pool.request().input('id', sql.Int, postId).query('SELECT * FROM Posts WHERE id=@id');
+    const post = result.recordset[0];
+    if (!post) return res.status(404).json({ success: false, message: 'Không tìm thấy bài đăng.' });
+    if (req.user.role !== 'admin' && post.created_by_user_id !== req.user.sub) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền sửa bài đăng này.' });
+    }
+    if (post.status === 'published') {
+      return res.status(409).json({ success: false, message: 'Bài viết đã xuất bản thành công lên Facebook, không thể chỉnh sửa lịch nữa.' });
+    }
+
+    const targetPageId = pageId ? String(pageId).trim() : post.page_id;
+    const targetScheduledAt = scheduledAt ? new Date(scheduledAt) : (post.scheduled_at || new Date());
+    const targetMediaType = mediaType || post.media_type || 'text';
+
+    await pool.request()
+      .input('id', sql.Int, postId)
+      .input('pageId', sql.VarChar, targetPageId)
+      .input('content', sql.NVarChar, content.trim())
+      .input('scheduledAt', sql.DateTime2, targetScheduledAt)
+      .input('mediaType', sql.VarChar, targetMediaType)
+      .query(`
+        UPDATE Posts
+        SET page_id = @pageId,
+            content = @content,
+            scheduled_at = @scheduledAt,
+            media_type = @mediaType,
+            status = 'pending',
+            error_message = NULL
+        WHERE id = @id
+      `);
+
+    try {
+      await addPostToQueue(postId, targetScheduledAt);
+    } catch (queueErr) {
+      console.warn('[Edit Post Queue Warning]', queueErr.message);
+    }
+
+    return res.json({ success: true, message: 'Đã cập nhật bài đăng thành công và đưa vào trạng thái chờ đăng!' });
+  } catch (error) {
+    console.error('[Edit Post Error]', error.message);
+    return res.status(500).json({ success: false, message: 'Không thể cập nhật bài đăng: ' + error.message });
   }
 });
 
@@ -671,7 +1087,18 @@ app.use((error, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+const server = app.listen(PORT, () => {
+  console.log(`Server listening on ${PORT}`);
+  if (process.env.DISABLE_EMBEDDED_WORKER !== 'true') {
+    try {
+      require('../queues/post.worker');
+      require('../queues/comment.worker');
+      console.log('[Worker Engine] Đã kích hoạt Worker nền chạy cùng Backend!');
+    } catch (workerErr) {
+      console.warn('[Worker Engine Warning] Không thể khởi động worker nền:', workerErr.message);
+    }
+  }
+});
 server.on('error', (error) => {
   console.error('[HTTP Server Error]', error.message);
   process.exitCode = 1;
