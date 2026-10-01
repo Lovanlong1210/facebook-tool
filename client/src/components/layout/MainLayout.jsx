@@ -4,17 +4,12 @@ import { useRouter } from 'next/router';
 import useAuth from '../../hooks/useAuth';
 import {
   BarChart3,
-  Bell,
   Bot,
   CalendarDays,
   ChevronDown,
-  CircleHelp,
-  FileSpreadsheet,
   LayoutDashboard,
-  MessageCircle,
   MoreHorizontal,
   PenLine,
-  Settings,
   Sparkles,
   UsersRound
 } from 'lucide-react';
@@ -24,7 +19,6 @@ const navigation = [
   { label: 'AI Studio', href: '/ai-studio', icon: Sparkles },
   { label: 'Viết bài', href: '/post-planner/compose', icon: PenLine },
   { label: 'Lịch đăng', href: '/post-planner/calendar', icon: CalendarDays },
-  { label: 'Hội thoại', href: '/channels', icon: MessageCircle },
   { label: 'Báo cáo', href: '/post-planner/dashboard', icon: BarChart3 },
   { label: 'Kênh', href: '/channels', icon: UsersRound },
   { label: 'Thêm', href: '/post-planner/bulk-upload', icon: MoreHorizontal }
@@ -33,9 +27,12 @@ const navigation = [
 export default function MainLayout({ children, title = 'Không gian làm việc', actions }) {
   const router = useRouter();
   const { user, loading, logout } = useAuth();
+  const isAuthenticated = Boolean(user);
 
   if (loading) return <div className="auth-loading">Đang xác thực phiên đăng nhập…</div>;
-  if (!user) return null;
+
+  const accountLabel = isAuthenticated ? user.name : 'Khách';
+  const accountRole = isAuthenticated ? (user.role === 'admin' ? 'Admin' : 'Thành viên') : 'Xem trước';
 
   return (
     <div className="workspace">
@@ -57,27 +54,33 @@ export default function MainLayout({ children, title = 'Không gian làm việc'
           })}
         </nav>
         <div className="sidebar-bottom">
-          <Link className="nav-item" href="/post-planner/bulk-upload" title="Tải Excel">
-            <FileSpreadsheet size={19} strokeWidth={1.8} aria-hidden="true" /><span>Tải Excel</span>
-          </Link>
-          <button className="nav-item" type="button" title="Cài đặt">
-            <Settings size={19} strokeWidth={1.8} aria-hidden="true" /><span>Cài đặt</span>
-          </button>
-          <button className="profile-avatar" type="button" aria-label="Tài khoản Tuấn">T</button>
+          <button className="profile-avatar" type="button" aria-label={accountLabel}>{isAuthenticated ? (user.name?.charAt(0)?.toUpperCase() || 'F') : 'V'}</button>
         </div>
       </aside>
 
       <div className="workspace-main">
         <header className="topbar">
           <div className="topbar-spacer" />
-          <button className="icon-button" type="button" aria-label="Trợ giúp"><CircleHelp size={19} /></button>
-          <button className="icon-button" type="button" aria-label="Thông báo"><Bell size={19} /></button>
-          <button className="account-chip" type="button" onClick={logout} title={`Facebook ID: ${user.id} · Đăng xuất`}><span className="account-dot">{user.name?.charAt(0)?.toUpperCase() || 'F'}</span><span>{user.name}<small className="account-role">{user.role === 'admin' ? 'Admin' : 'Thành viên'} · Đăng xuất</small></span><ChevronDown size={15} /></button>
+          <button
+            className="account-chip"
+            type="button"
+            onClick={() => {
+              if (isAuthenticated) {
+                logout();
+                return;
+              }
+              router.push('/login');
+            }}
+            title={isAuthenticated ? `Facebook ID: ${user.id} · Đăng xuất` : 'Đăng nhập để dùng chức năng quản lý'}
+          >
+            <span className="account-dot">{isAuthenticated ? (user.name?.charAt(0)?.toUpperCase() || 'F') : 'V'}</span>
+            <span>{accountLabel}<small className="account-role">{accountRole} · {isAuthenticated ? 'Đăng xuất' : 'Đăng nhập'}</small></span>
+            <ChevronDown size={15} />
+          </button>
         </header>
         <main className="page-area">
           <div className="page-topline">
             <div>
-              <span className="eyebrow">SO9 SOCIAL WORKSPACE</span>
               <h1>{title}</h1>
             </div>
             {actions && <div className="page-actions">{actions}</div>}
@@ -85,7 +88,7 @@ export default function MainLayout({ children, title = 'Không gian làm việc'
           {children}
         </main>
       </div>
-      <button className="support-fab" type="button" aria-label="Mở hỗ trợ"><Bot size={20} /></button>
+      <button className="support-fab" type="button" aria-label="Mở hỗ trợ" style={{ display: 'none' }}><Bot size={20} /></button>
     </div>
   );
 }

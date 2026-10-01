@@ -58,8 +58,18 @@ function facebookRedirectUri() {
   return process.env.FACEBOOK_REDIRECT_URI || 'http://localhost:5000/api/auth/facebook/callback';
 }
 
+function clientOrigins() {
+  const configured = (process.env.CLIENT_ORIGIN || 'http://localhost:3001,http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => origin.replace(/\/$/, ''));
+  const preferred = ['http://localhost:3001', 'http://localhost:3000'];
+  return [...new Set([...configured, ...preferred])];
+}
+
 function clientOrigin() {
-  return (process.env.CLIENT_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
+  return clientOrigins()[0];
 }
 
 function adminIds() {
@@ -114,7 +124,8 @@ function loadSession(req, _res, next) {
 
 function originIsAllowed(req) {
   const origin = req.get('origin');
-  return !origin || origin === clientOrigin();
+  if (!origin) return true;
+  return clientOrigins().includes(origin.replace(/\/$/, ''));
 }
 
 function requireAuth(req, res, next) {

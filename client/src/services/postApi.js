@@ -8,8 +8,13 @@ export const postApi = {
     return response.data;
   },
 
-  getInsights: async (days = 14) => {
-    const response = await axios.get(`${API_BASE_URL}/reports/insights`, { params: { days } });
+  getInsights: async (days = 14, pageId) => {
+    const response = await axios.get(`${API_BASE_URL}/reports/insights`, { params: { days, pageId } });
+    return response.data;
+  },
+
+  getWorkspaceReport: async () => {
+    const response = await axios.get(`${API_BASE_URL}/reports/workspace`);
     return response.data;
   },
 

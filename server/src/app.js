@@ -33,8 +33,22 @@ const {
 } = require('./middlewares/auth');
 
 const app = express();
-const frontendOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
-app.use(cors({ origin: frontendOrigin, credentials: true }));
+const allowedClientOrigins = new Set(
+  (process.env.CLIENT_ORIGIN || 'http://localhost:3001,http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .concat(['http://localhost:3001', 'http://localhost:3000'])
+);
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedClientOrigins.has(origin.replace(/\/$/, ''))) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Origin not allowed by CORS'));
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '2mb' }));
 app.use('/api', loadSession);
 
@@ -123,12 +137,12 @@ app.get('/api/auth/facebook', (req, res) => {
 
   const state = crypto.randomBytes(32).toString('base64url');
   setCookie(req, res, OAUTH_STATE_COOKIE, state, 10 * 60);
-  const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
+  const graphVersion = process.env.FB_LOGIN_GRAPH_VERSION || process.env.FB_GRAPH_VERSION || 'v26.0';
   const authorizationUrl = new URL(`https://www.facebook.com/${graphVersion}/dialog/oauth`);
   authorizationUrl.searchParams.set('client_id', process.env.FACEBOOK_APP_ID);
   authorizationUrl.searchParams.set('redirect_uri', facebookRedirectUri());
   authorizationUrl.searchParams.set('response_type', 'code');
-  authorizationUrl.searchParams.set('scope', process.env.FACEBOOK_LOGIN_SCOPES || 'public_profile');
+  authorizationUrl.searchParams.set('scope', process.env.FACEBOOK_LOGIN_SCOPES || 'public_profile,pages_show_list,pages_read_engagement,pages_manage_posts');
   authorizationUrl.searchParams.set('state', state);
   return res.redirect(302, authorizationUrl.toString());
 });
@@ -146,7 +160,7 @@ app.get('/api/auth/facebook/callback', async (req, res) => {
   }
 
   try {
-    const graphVersion = process.env.FB_GRAPH_VERSION || 'v19.0';
+    const graphVersion = process.env.FB_LOGIN_GRAPH_VERSION || process.env.FB_GRAPH_VERSION || 'v26.0';
     const shortTokenResponse = await axios.get(`https://graph.facebook.com/${graphVersion}/oauth/access_token`, {
       params: {
         client_id: process.env.FACEBOOK_APP_ID,
@@ -178,8 +192,12 @@ app.get('/api/auth/facebook/callback', async (req, res) => {
       timeout: 15000
     });
     await saveFacebookUser(profileResponse.data, userAccessToken, tokenExpiresIn);
-    const connectedPages = await syncFacebookPages(profileResponse.data.id, userAccessToken);
-    console.log(`[Facebook OAuth] Connected ${connectedPages.length} Page(s) for user ${profileResponse.data.id}.`);
+    try {
+      const connectedPages = await syncFacebookPages(profileResponse.data.id, userAccessToken);
+      console.log(`[Facebook OAuth] Connected ${connectedPages.length} Page(s) for user ${profileResponse.data.id}.`);
+    } catch (pageSyncError) {
+      console.warn('[Facebook OAuth] Login succeeded; Page sync unavailable:', pageSyncError.response?.data?.error?.message || pageSyncError.message);
+    }
     setCookie(req, res, SESSION_COOKIE, signSession(profileResponse.data), SESSION_TTL_SECONDS);
     return res.redirect(`${clientOrigin()}/dashboard`);
   } catch (error) {
@@ -387,10 +405,65 @@ app.get('/api/posts/stats', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/reports/workspace', requireAuth, async (req, res) => {
+  try {
+    await ensurePostOwnershipSchema();
+    const pages = await getConnectedPages(req.user.sub).catch(() => []);
+    const pool = await getPool();
+    const request = pool.request();
+    const where = req.user.role === 'admin' ? '' : 'WHERE created_by_user_id=@ownerId';
+    if (req.user.role !== 'admin') request.input('ownerId', sql.VarChar(64), req.user.sub);
+    const result = await request.query(`SELECT page_id,media_type,status,created_by_user_id,COUNT(*) AS total FROM Posts ${where} GROUP BY page_id,media_type,status,created_by_user_id;`);
+    const pageNames = new Map(pages.map((page) => [String(page.id), page.name]));
+    const channelMap = new Map();
+    const accountMap = new Map();
+    const contentTypes = { text: 0, image: 0, video: 0 };
+    for (const row of result.recordset) {
+      const pageId = String(row.page_id || 'unassigned');
+      const mediaType = ['text', 'image', 'video'].includes(String(row.media_type).toLowerCase()) ? String(row.media_type).toLowerCase() : 'text';
+      const total = Number(row.total || 0);
+      const channel = channelMap.get(pageId) || { pageId, pageName: pageNames.get(pageId) || pageId, total: 0, published: 0, pending: 0, failed: 0 };
+      channel.total += total;
+      if (row.status === 'published') channel.published += total;
+      if (row.status === 'pending') channel.pending += total;
+      if (row.status === 'failed') channel.failed += total;
+      channelMap.set(pageId, channel);
+      contentTypes[mediaType] += total;
+
+      const accountId = String(row.created_by_user_id || 'unassigned');
+      const account = accountMap.get(accountId) || {
+        accountId,
+        accountName: accountId === String(req.user.sub) ? req.user.name : `Tài khoản ${accountId}`,
+        total: 0,
+        published: 0,
+        pending: 0,
+        failed: 0,
+        contentTypes: { text: 0, image: 0, video: 0 }
+      };
+      account.total += total;
+      account.contentTypes[mediaType] += total;
+      if (row.status === 'published') account.published += total;
+      if (row.status === 'pending') account.pending += total;
+      if (row.status === 'failed') account.failed += total;
+      accountMap.set(accountId, account);
+    }
+    return res.json({
+      success: true,
+      channels: [...channelMap.values()].sort((left, right) => right.total - left.total),
+      accounts: [...accountMap.values()].sort((left, right) => right.total - left.total),
+      contentTypes
+    });
+  } catch (error) {
+    console.error('[Workspace Report Error]', error.message);
+    return res.status(500).json({ success: false, message: 'Không thể tải phân tích nội dung workspace.' });
+  }
+});
+
 app.get('/api/reports/insights', requireAuth, async (req, res) => {
   let pageId = req.query.pageId ? String(req.query.pageId) : '';
+  let pages = [];
   try {
-    const pages = await getConnectedPages(req.user.sub);
+    pages = await getConnectedPages(req.user.sub);
     pageId = pageId || pages[0]?.id;
     if (!pageId) return res.status(409).json({ success: false, available: false, message: 'Tài khoản chưa có Fanpage đã kết nối.' });
     if (!pages.some((page) => String(page.id) === pageId)) return res.status(403).json({ success: false, available: false, message: 'Không có quyền xem Insights của Fanpage này.' });
@@ -403,15 +476,78 @@ app.get('/api/reports/insights', requireAuth, async (req, res) => {
   const since = new Date(until.getTime() - days * 86400000);
   try {
     const token = await getFacebookPageAccessToken(pageId);
-    const version = process.env.FB_GRAPH_VERSION || 'v19.0';
-    const names = (process.env.FB_INSIGHT_METRICS || 'page_post_engagements,page_views_total,page_media_view').split(',').map((value) => value.trim()).filter(Boolean);
+    const version = process.env.FB_INSIGHTS_GRAPH_VERSION || 'v26.0';
+    const names = (process.env.FB_INSIGHT_METRICS || 'page_views_total,page_media_view,page_total_media_view_unique,page_post_engagements,page_video_views,page_video_view_time,page_follows,page_daily_follows_unique,page_fan_adds_by_paid_non_paid_unique,page_actions_post_reactions_total,page_follows_city,page_follows_country').split(',').map((value) => value.trim()).filter(Boolean);
     const result = await axios.get(`https://graph.facebook.com/${version}/${pageId}/insights`, {
       params: { metric: names.join(','), period: 'day', since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10), access_token: token },
       timeout: 15000
     });
     const metrics = (result.data.data || []).map((metric) => ({ name: metric.name, period: metric.period, values: (metric.values || []).map((item) => ({ endTime: item.end_time, value: item.value })) }));
     const available = metrics.some((metric) => metric.values.length > 0);
-    return res.json({ success: true, available, days, metrics, message: available ? null : 'Facebook chưa trả datapoint Insights cho Page này trong khoảng thời gian đã chọn.' });
+    const page = pages.find((item) => String(item.id) === pageId);
+    let breakdowns = { ads: [], followers: [] };
+    const pageViews = metrics.find((metric) => metric.name === 'page_media_view');
+    if (pageViews?.values.length) {
+      const fetchBreakdown = async (breakdown) => {
+        try {
+          const response = await axios.get(`https://graph.facebook.com/${version}/${pageId}/insights`, {
+            params: { metric: 'page_media_view', period: 'day', since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10), breakdown, access_token: token },
+            timeout: 15000
+          });
+          return (response.data.data?.[0]?.values || []).map((item) => ({ endTime: item.end_time, value: item.value }));
+        } catch (error) {
+          console.warn(`[Insights Breakdown Error] ${breakdown}:`, error.response?.data?.error?.message || error.message);
+          return [];
+        }
+      };
+      const [ads, followers] = await Promise.all([fetchBreakdown('is_from_ads'), fetchBreakdown('is_from_followers')]);
+      breakdowns = { ads, followers };
+    }
+    let fanCount = null;
+    let followersCount = null;
+    try {
+      const pageDetails = await axios.get(`https://graph.facebook.com/${version}/${pageId}`, {
+        params: { fields: 'fan_count,followers_count', access_token: token },
+        timeout: 10000
+      });
+      const fans = Number(pageDetails.data.fan_count);
+      const followers = Number(pageDetails.data.followers_count);
+      if (Number.isFinite(fans)) fanCount = fans;
+      if (Number.isFinite(followers)) followersCount = followers;
+    } catch {}
+    const message = available
+      ? null
+      : fanCount !== null && fanCount < 100
+        ? `Page này có ${fanCount} lượt thích; Meta yêu cầu ít nhất 100 lượt thích để cung cấp Page Insights.`
+        : 'Meta chưa có dữ liệu trong kỳ. Dữ liệu thường cập nhật mỗi 24 giờ; nếu Page đã đủ điều kiện, hãy kiểm tra quyền Page Insights và trạng thái App Review trong Meta for Developers.';
+    const findMetric = (name) => metrics.find((metric) => metric.name === name);
+    const latestBreakdown = (name) => {
+      const values = findMetric(name)?.values || [];
+      const value = values[values.length - 1]?.value;
+      if (Array.isArray(value)) {
+        return value.map((item) => ({ name: String(item.name || item.key || item.label || 'Khác'), value: Number(item.value) || 0 }));
+      }
+      if (value && typeof value === 'object') {
+        return Object.entries(value).map(([label, count]) => ({
+          name: label,
+          value: Number(count && typeof count === 'object' ? count.value : count) || 0
+        }));
+      }
+      return [];
+    };
+    return res.json({
+      success: true,
+      available,
+      days,
+      page: { id: pageId, name: page?.name || pageId, fanCount, followersCount },
+      metrics,
+      breakdowns,
+      demographics: {
+        cities: latestBreakdown('page_follows_city').sort((left, right) => right.value - left.value),
+        countries: latestBreakdown('page_follows_country').sort((left, right) => right.value - left.value)
+      },
+      message
+    });
   } catch (error) {
     return sendApiError(res, 'Insights Error', error, 'Không tải được Facebook Insights.');
   }

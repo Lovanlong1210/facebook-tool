@@ -10,6 +10,7 @@ export default function useAuth() {
 	useEffect(() => {
 		if (!router.isReady) return;
 		if (router.pathname === '/login' || router.pathname === '/') {
+			setUser(null);
 			setLoading(false);
 			return;
 		}
@@ -17,21 +18,20 @@ export default function useAuth() {
 		let active = true;
 		authApi.me()
 			.then((result) => { if (active) setUser(result.user); })
-			.catch(() => {
-				if (active) {
-					const returnUrl = `${router.asPath || '/'}`;
-					router.replace(`/login?next=${encodeURIComponent(returnUrl)}`);
-				}
-			})
+			.catch(() => { if (active) setUser(null); })
 			.finally(() => { if (active) setLoading(false); });
 
 		return () => { active = false; };
 	}, [router.isReady, router.pathname, router.asPath]);
 
 	const logout = async () => {
-		try { await authApi.logout(); } finally {
+		try {
+			await authApi.logout();
+		} catch (error) {
+			console.warn('Logout backend call failed, continuing to guest view.', error);
+		} finally {
 			setUser(null);
-			await router.replace('/login?loggedOut=1');
+			await router.push('/');
 		}
 	};
 

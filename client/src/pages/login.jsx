@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { Globe2, ShieldCheck } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, BarChart3, CalendarDays, CheckCircle2, Layers3, LoaderCircle, ShieldCheck } from 'lucide-react';
 import authApi from '../services/authApi';
+
+const workspaceFeatures = [
+  { icon: CalendarDays, title: 'Lịch đăng', description: 'Theo dõi nội dung theo ngày.' },
+  { icon: Layers3, title: 'Fanpage đã kết nối', description: 'Đồng bộ các Page bạn quản lý.' },
+  { icon: BarChart3, title: 'Báo cáo', description: 'Theo dõi trạng thái và hiệu suất.' }
+];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,17 +42,71 @@ export default function LoginPage() {
 
   return (
     <main className="login-shell">
-      <section className="login-card">
-        <div className="login-brand"><Image src="/brand-logo.jpg" alt="Logo" width={52} height={52} priority /><div><span className="eyebrow">SO9 SOCIAL WORKSPACE</span><h1>Đăng nhập</h1></div></div>
-        <p className="login-intro">Đăng nhập bằng Facebook để quản lý Fanpage và lịch đăng bài.</p>
-        {errorMessage && <div className="notice login-error">{errorMessage}</div>}
-        <button className="button button-primary login-facebook" type="button" onClick={startFacebookLogin} disabled={loading || !authStatus?.configured}>
-          <Globe2 size={18} /> Tiếp tục với Facebook
-        </button>
-        {!loading && !authStatus?.configured && <div className="login-setup"><strong>Cần cấu hình máy chủ</strong><p>Thêm các biến sau vào <code>server/.env</code> rồi restart backend:</p><ul>{(authStatus?.missing || []).map((item) => <li key={item}><code>{item}</code></li>)}</ul><p>Meta App cần bật Facebook Login và đăng ký đúng <code>FACEBOOK_REDIRECT_URI</code>. Thêm Facebook User ID của quản trị viên vào <code>FACEBOOK_ADMIN_IDS</code>.</p></div>}
-        {!loading && authStatus?.configured && !authStatus.adminConfigured && <div className="login-setup"><strong>Chưa có admin được khai báo</strong><p>Bạn vẫn có thể đăng nhập với quyền thành viên. Đăng nhập xong, xem Facebook ID ở tooltip tài khoản rồi thêm ID đó vào <code>FACEBOOK_ADMIN_IDS</code> trong <code>server/.env</code>.</p></div>}
-        <div className="login-security"><ShieldCheck size={16} /> Session được ký máy chủ và cookie HttpOnly; access token Facebook không lưu trong session.</div>
-      </section>
+      <div className="login-frame">
+        <header className="login-topbar">
+          <Link href="/" className="login-wordmark" aria-label="Về trang chủ">
+            <span className="login-avatar"><Image src="/brand-logo.jpg" alt="" width={44} height={44} priority /></span>
+            <span className="login-wordmark-copy"><strong>PAGE WORKSPACE</strong><small>FACEBOOK CONTENT DESK</small></span>
+          </Link>
+          <Link href="/" className="login-home-link">Trang chủ <ArrowUpRight size={15} /></Link>
+        </header>
+
+        <div className="login-layout">
+          <section className="login-story" aria-label="Không gian làm việc">
+            <div className="login-kicker"><span /> QUẢN LÝ NỘI DUNG FACEBOOK</div>
+            <h1>Giữ mọi Page<br /><em>đúng nhịp.</em></h1>
+            <p className="login-story-copy">Một nơi để sắp xếp lịch đăng, nội dung và hiệu suất các Fanpage của bạn.</p>
+
+            <div className="login-feature-list">
+              {workspaceFeatures.map(({ icon: Icon, title, description }, index) => <div className="login-feature" key={title}>
+                <span className="login-feature-number">0{index + 1}</span>
+                <span className="login-feature-icon"><Icon size={18} strokeWidth={1.8} /></span>
+                <span className="login-feature-copy"><strong>{title}</strong><small>{description}</small></span>
+              </div>)}
+            </div>
+
+            <div className="login-story-foot"><span className="login-live-dot" /> Kết nối trực tiếp với Facebook</div>
+          </section>
+
+          <section className="login-panel" aria-labelledby="login-title">
+            <div className="login-panel-head">
+              <span className="login-panel-label">TÀI KHOẢN CỦA BẠN</span>
+              <h2 id="login-title">Đăng nhập</h2>
+              <p>Tiếp tục bằng tài khoản Facebook để vào workspace.</p>
+            </div>
+
+            {errorMessage && <div className="notice login-error" role="alert"><span>{errorMessage}</span></div>}
+
+            <button className="button button-primary login-facebook" type="button" onClick={startFacebookLogin} disabled={loading || !authStatus?.configured}>
+              {loading ? <LoaderCircle className="login-spinner" size={18} /> : <ArrowRight size={18} />}
+              {loading ? 'Đang kiểm tra kết nối…' : 'Tiếp tục với Facebook'}
+              {!loading && <ArrowUpRight className="login-button-arrow" size={16} />}
+            </button>
+
+            {!errorMessage && !loading && authStatus?.configured && (
+              <div className="login-status-box"><CheckCircle2 size={16} /><span>Fanpage được đồng bộ từ tài khoản Facebook bạn kết nối.</span></div>
+            )}
+
+            {!loading && !authStatus?.configured && (
+              <div className="login-setup">
+                <strong>Cần cấu hình backend</strong>
+                <p>Vui lòng kiểm tra các biến môi trường trong <code>server/.env</code> và khởi động lại server.</p>
+              </div>
+            )}
+
+            {!loading && authStatus?.configured && !authStatus.adminConfigured && (
+              <div className="login-setup">
+                <strong>Chưa có quản trị viên được khai báo</strong>
+                <p>Đăng nhập sẽ tiếp tục. Nếu cần quyền quản trị, hãy thêm Facebook User ID của bạn vào <code>FACEBOOK_ADMIN_IDS</code>.</p>
+              </div>
+            )}
+
+            <div className="login-security"><ShieldCheck size={17} /><span>Ứng dụng không nhận hoặc lưu mật khẩu Facebook.</span></div>
+          </section>
+        </div>
+
+        <footer className="login-footer"><span>PAGE WORKSPACE</span><span>Đăng nhập bảo mật qua Facebook OAuth</span></footer>
+      </div>
     </main>
   );
 }
