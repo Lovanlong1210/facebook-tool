@@ -4,6 +4,7 @@ import postApi from '../../services/postApi';
 import channelApi from '../../services/channelApi';
 import { CalendarClock, ChevronLeft, ChevronRight, RefreshCw, Send, Trash2, Pencil, X } from 'lucide-react';
 import RichPostEditor from '../../components/planner/RichPostEditor';
+import DateTimePicker24h from '../../components/common/DateTimePicker24h';
 
 export default function PostListPage() {
   const [posts, setPosts] = useState([]);
@@ -258,13 +259,10 @@ export default function PostListPage() {
               </div>
 
               <div>
-                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Lịch đăng (Ngày & Giờ)</label>
-                <input
-                  type="datetime-local"
-                  className="field"
+                <DateTimePicker24h
+                  label="Lịch đăng (Chuẩn 24 Giờ)"
                   value={editScheduledAt}
-                  onChange={(e) => setEditScheduledAt(e.target.value)}
-                  style={{ width: '100%' }}
+                  onChange={setEditScheduledAt}
                 />
               </div>
 

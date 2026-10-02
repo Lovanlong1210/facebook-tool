@@ -28,6 +28,7 @@ import {
 import MainLayout from '../../components/layout/MainLayout';
 import postApi from '../../services/postApi';
 import channelApi from '../../services/channelApi';
+import DateTimePicker24h from '../../components/common/DateTimePicker24h';
 
 const SAVED_FILES_KEY = 'pageflow_saved_excel_history_v1';
 
@@ -811,14 +812,11 @@ export default function BulkUpload() {
                 />
               </div>
 
-              <div className="form-item" style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#1E293B' }}>Thời gian đăng</label>
-                <input
-                  type="datetime-local"
-                  value={editingPost.scheduledAt ? new Date(editingPost.scheduledAt).toISOString().slice(0, 16) : ''}
-                  onChange={(e) => setEditingPost({ ...editingPost, scheduledAt: new Date(e.target.value).toISOString() })}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #CBD5E1', fontSize: 13 }}
-                  required
+              <div style={{ marginBottom: 14 }}>
+                <DateTimePicker24h
+                  label="Thời gian lên lịch đăng bài"
+                  value={editingPost.scheduledAt}
+                  onChange={(newVal) => setEditingPost({ ...editingPost, scheduledAt: newVal })}
                 />
               </div>
 

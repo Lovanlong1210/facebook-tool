@@ -17,6 +17,7 @@ import {
 import MainLayout from '../../components/layout/MainLayout';
 import RichPostEditor from '../../components/planner/RichPostEditor';
 import FacebookFeedPreview from '../../components/planner/FacebookFeedPreview';
+import DateTimePicker24h from '../../components/common/DateTimePicker24h';
 import postApi from '../../services/postApi';
 
 const steps = ['Soạn thảo nội dung', 'Chọn kênh & Lên lịch', 'Kiểm tra & Xuất bản'];
@@ -293,16 +294,13 @@ export default function ComposePage() {
               </div>
 
               {publishMode === 'schedule' && (
-                <div style={{ marginBottom: 16, padding: '12px 14px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                  <label className="field-label" htmlFor="scheduled-at">Ngày & Giờ đăng bài</label>
-                  <input
-                    id="scheduled-at"
-                    className="field"
-                    type="datetime-local"
+                <div style={{ marginBottom: 16, padding: '14px 16px', background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                  <DateTimePicker24h
+                    label="Ngày & Giờ đăng bài"
                     value={scheduledAt}
-                    onChange={(event) => setScheduledAt(event.target.value)}
+                    onChange={setScheduledAt}
                   />
-                  <small style={{ color: '#64748b', marginTop: 4, display: 'block' }}>
+                  <small style={{ color: '#64748b', marginTop: 8, display: 'block' }}>
                     Hệ thống hàng đợi BullMQ sẽ tự động xuất bản đúng thời điểm đã chọn.
                   </small>
                 </div>
