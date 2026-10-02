@@ -19,11 +19,17 @@ import {
   MessageSquare,
   Image as ImageIcon,
   Video,
-  FileText
+  FileText,
+  FolderArchive,
+  History,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import MainLayout from '../../components/layout/MainLayout';
 import postApi from '../../services/postApi';
 import channelApi from '../../services/channelApi';
+
+const SAVED_FILES_KEY = 'pageflow_saved_excel_history_v1';
 
 export default function BulkUpload() {
   const [file, setFile] = useState(null);
@@ -35,12 +41,14 @@ export default function BulkUpload() {
 
   // Danh sách bài đã parse từ Excel để xem, sửa, xoá
   const [stagedPosts, setStagedPosts] = useState([]);
+  const [selectedTempIds, setSelectedTempIds] = useState([]);
   const [channels, setChannels] = useState([]);
 
-  // Modal Preview
-  const [previewPost, setPreviewPost] = useState(null);
+  // Lịch sử file đã lưu
+  const [savedFiles, setSavedFiles] = useState([]);
 
-  // Modal Edit
+  // Modal Preview & Edit
+  const [previewPost, setPreviewPost] = useState(null);
   const [editingPost, setEditingPost] = useState(null);
 
   useEffect(() => {
@@ -49,7 +57,53 @@ export default function BulkUpload() {
         setChannels(res.channels || []);
       })
       .catch(() => {});
+
+    // Đọc lịch sử file đã lưu từ localStorage
+    try {
+      const stored = localStorage.getItem(SAVED_FILES_KEY);
+      if (stored) {
+        setSavedFiles(JSON.parse(stored));
+      }
+    } catch {}
   }, []);
+
+  const saveFileToHistory = (fileName, fileSize, posts) => {
+    try {
+      const newEntry = {
+        fileId: 'file_' + Date.now(),
+        fileName: fileName || 'Lịch đăng Excel',
+        uploadDate: new Date().toISOString(),
+        fileSize: fileSize || 0,
+        totalPosts: posts.length,
+        posts
+      };
+      setSavedFiles((prev) => {
+        const updated = [newEntry, ...prev.filter((f) => f.fileName !== fileName)].slice(0, 10);
+        localStorage.setItem(SAVED_FILES_KEY, JSON.stringify(updated));
+        return updated;
+      });
+    } catch {}
+  };
+
+  const removeFileFromHistory = (fileId, e) => {
+    if (e) e.stopPropagation();
+    if (confirm('Bạn có chắc muốn xoá tệp này khỏi danh sách đã lưu?')) {
+      setSavedFiles((prev) => {
+        const updated = prev.filter((f) => f.fileId !== fileId);
+        localStorage.setItem(SAVED_FILES_KEY, JSON.stringify(updated));
+        return updated;
+      });
+    }
+  };
+
+  const loadFromHistory = (saved) => {
+    if (!saved || !Array.isArray(saved.posts)) return;
+    setStagedPosts(saved.posts);
+    setSelectedTempIds(saved.posts.map((p) => p.tempId));
+    setStatusMessage(`Đã nạp lại ${saved.posts.length} bài đăng từ tệp "${saved.fileName}". Hãy tick chọn các bài muốn lên lịch!`);
+    setErrorMessage('');
+    setSuccessInfo(null);
+  };
 
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
@@ -77,7 +131,10 @@ export default function BulkUpload() {
       const res = await postApi.parseExcel(formData);
       if (res.success && Array.isArray(res.posts)) {
         setStagedPosts(res.posts);
-        setStatusMessage(`Đã đọc thành công ${res.posts.length} bài đăng từ tệp Excel. Vui lòng kiểm tra, chỉnh sửa và bấm Xác nhận để lên lịch.`);
+        // Mặc định chọn tất cả bài đăng
+        setSelectedTempIds(res.posts.map((p) => p.tempId));
+        saveFileToHistory(file.name, file.size, res.posts);
+        setStatusMessage(`Đã đọc và lưu tệp thành công (${res.posts.length} bài đăng). Bạn có thể tick chọn bài muốn đăng, xem, sửa hoặc xoá trước khi xác nhận!`);
       } else {
         setErrorMessage(res.message || 'Không thể đọc nội dung file Excel.');
       }
@@ -88,17 +145,35 @@ export default function BulkUpload() {
     }
   };
 
+  // Xử lý Chọn tất cả / Bỏ chọn tất cả
+  const handleToggleSelectAll = () => {
+    if (selectedTempIds.length === stagedPosts.length) {
+      setSelectedTempIds([]);
+    } else {
+      setSelectedTempIds(stagedPosts.map((p) => p.tempId));
+    }
+  };
+
+  // Xử lý Chọn / Bỏ chọn từng bài
+  const handleToggleSelectOne = (tempId) => {
+    setSelectedTempIds((prev) =>
+      prev.includes(tempId) ? prev.filter((id) => id !== tempId) : [...prev, tempId]
+    );
+  };
+
   // Xóa 1 bài khỏi danh sách staged
   const handleDeletePost = (tempId) => {
     if (confirm('Bạn có chắc muốn loại bỏ bài đăng này khỏi danh sách lên lịch?')) {
       setStagedPosts((prev) => prev.filter((p) => p.tempId !== tempId));
+      setSelectedTempIds((prev) => prev.filter((id) => id !== tempId));
     }
   };
 
-  // Xóa toàn bộ để chọn lại file
+  // Hủy bỏ toàn bộ
   const handleReset = () => {
-    if (confirm('Hủy bỏ toàn bộ danh sách vừa tải lên để chọn lại file khác?')) {
+    if (confirm('Hủy bỏ danh sách đang duyệt để chọn file khác?')) {
       setStagedPosts([]);
+      setSelectedTempIds([]);
       setFile(null);
       setStatusMessage('');
       setErrorMessage('');
@@ -128,10 +203,12 @@ export default function BulkUpload() {
     setEditingPost(null);
   };
 
-  // Bước 2: Xác nhận và chính thức gửi danh sách lên lịch
+  // Bước 2: Xác nhận và chính thức gửi những bài ĐÃ CHỌN lên lịch
   const handleConfirmAndSchedule = async () => {
-    if (stagedPosts.length === 0) {
-      alert('Không có bài đăng nào trong danh sách!');
+    const postsToSchedule = stagedPosts.filter((p) => selectedTempIds.includes(p.tempId));
+
+    if (postsToSchedule.length === 0) {
+      alert('Vui lòng chọn ít nhất 1 bài đăng để lên lịch!');
       return;
     }
 
@@ -140,14 +217,17 @@ export default function BulkUpload() {
     setStatusMessage('');
 
     try {
-      const res = await postApi.confirmBulkPosts(stagedPosts);
+      const res = await postApi.confirmBulkPosts(postsToSchedule);
       if (res.success) {
         setSuccessInfo({
-          total: stagedPosts.length,
+          total: postsToSchedule.length,
           createdCount: (res.data || []).length,
           errors: res.errors || []
         });
-        setStagedPosts([]);
+        // Loại bỏ các bài đã đăng thành công khỏi staged list
+        const remaining = stagedPosts.filter((p) => !selectedTempIds.includes(p.tempId));
+        setStagedPosts(remaining);
+        setSelectedTempIds(remaining.map((p) => p.tempId));
         setFile(null);
       } else {
         setErrorMessage(res.message || 'Không thể xếp lịch bài viết.');
@@ -170,7 +250,7 @@ export default function BulkUpload() {
               <div>
                 <strong style={{ fontSize: 16, color: '#065F46' }}>Lên lịch thành công!</strong>
                 <p style={{ margin: '4px 0 0', fontSize: 13, color: '#047857' }}>
-                  Đã đưa {successInfo.createdCount}/{successInfo.total} bài đăng vào hàng đợi xuất bản tự động BullMQ.
+                  Đã đưa {successInfo.createdCount}/{successInfo.total} bài đăng đã chọn vào hàng đợi xuất bản tự động BullMQ.
                 </p>
               </div>
             </div>
@@ -202,8 +282,8 @@ export default function BulkUpload() {
         </div>
       )}
 
-      {/* GIAI ĐOẠN 1: Nếu chưa parse file, hiển thị khung upload */}
-      {stagedPosts.length === 0 && !successInfo && (
+      {/* GIAI ĐOẠN 1: Nếu chưa parse file, hiển thị khung upload và danh sách file đã lưu */}
+      {stagedPosts.length === 0 && (
         <div className="upload-layout">
           <section className="panel">
             <div className="panel-heading">
@@ -241,13 +321,73 @@ export default function BulkUpload() {
           </section>
 
           <aside className="panel">
-            <div className="panel-heading"><h2>Quy chuẩn tệp Excel</h2></div>
+            <div className="panel-heading">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <History size={16} color="#FF6B00" />
+                <h2>Tệp Excel đã lưu gần đây</h2>
+              </div>
+              <span className="muted" style={{ fontSize: 11 }}>{savedFiles.length} tệp</span>
+            </div>
             <div className="panel-body upload-tips">
-              <div className="tip-line"><Check size={16} className="tip-check" /> Tên Sheet bắt buộc là: <strong>MAIN SHEET</strong>.</div>
-              <div className="tip-line"><Check size={16} className="tip-check" /> Cột nội dung: <strong>Content</strong> hoặc <strong>Nội dung</strong>.</div>
-              <div className="tip-line"><Check size={16} className="tip-check" /> Cột lịch đăng: <strong>Schedule</strong> (ví dụ: <code>2026-10-05 14:30</code>).</div>
-              <div className="tip-line"><Check size={16} className="tip-check" /> Hỗ trợ tự động xếp Seeding Comment (Cột <strong>Comment 1</strong>, <strong>Comment 2</strong>...).</div>
-              <div style={{ marginTop: 14 }}>
+              {savedFiles.length === 0 ? (
+                <p className="muted" style={{ fontSize: 12, margin: '8px 0' }}>
+                  Chưa có tệp nào được lưu. Khi bạn tải tệp Excel lên, hệ thống sẽ tự động lưu lại tại đây để bạn mở lại bất cứ lúc nào!
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                  {savedFiles.map((item) => (
+                    <div
+                      key={item.fileId}
+                      onClick={() => loadFromHistory(item)}
+                      style={{
+                        padding: '10px 12px',
+                        background: '#FAFBFC',
+                        border: '1px solid #EBECF0',
+                        borderRadius: 10,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.borderColor = '#FF6B00'}
+                      onMouseLeave={(e) => e.currentTarget.style.borderColor = '#EBECF0'}
+                    >
+                      <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <FileSpreadsheet size={15} color="#10B981" />
+                          <strong style={{ fontSize: 13, color: '#172B4D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.fileName}
+                          </strong>
+                        </div>
+                        <span style={{ fontSize: 11, color: '#6B778C', display: 'block', marginTop: 2 }}>
+                          {item.totalPosts} bài đăng · {new Date(item.uploadDate).toLocaleDateString('vi-VN')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          style={{ padding: '4px 8px', fontSize: 11 }}
+                          onClick={(e) => { e.stopPropagation(); loadFromHistory(item); }}
+                        >
+                          Mở
+                        </button>
+                        <button
+                          type="button"
+                          style={{ background: 'transparent', border: 0, color: '#94A3B8', cursor: 'pointer', padding: 4 }}
+                          onClick={(e) => removeFileFromHistory(item.fileId, e)}
+                          title="Xóa khỏi lịch sử"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ borderTop: '1px solid #EBECF0', paddingTop: 14 }}>
                 <a className="button button-secondary" href={postApi.templateUrl} style={{ width: '100%', textAlign: 'center', display: 'block' }}>
                   📥 Tải file mẫu Excel chuẩn
                 </a>
@@ -257,14 +397,16 @@ export default function BulkUpload() {
         </div>
       )}
 
-      {/* GIAI ĐOẠN 2: BẢNG DUYỆT BÀI ĐĂNG (STAGING PREVIEW, EDIT & DELETE) */}
+      {/* GIAI ĐOẠN 2: BẢNG DUYỆT BÀI ĐĂNG (CHỌN BÀI ĐỂ ĐĂNG, XEM, SỬA, XÓA) */}
       {stagedPosts.length > 0 && (
         <section className="panel" style={{ marginTop: 6 }}>
           <div className="panel-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div>
-              <h2 style={{ fontSize: 18, margin: 0 }}>Danh sách bài đăng vừa tải lên ({stagedPosts.length} bài)</h2>
+              <h2 style={{ fontSize: 18, margin: 0 }}>
+                Duyệt bài đăng ({selectedTempIds.length}/{stagedPosts.length} bài được chọn)
+              </h2>
               <span className="muted" style={{ fontSize: 12 }}>
-                Bạn có thể xem trước bài viết, chỉnh sửa nội dung/kênh, xoá bài không muốn đăng trước khi xác nhận lên lịch.
+                Tick chọn các bài muốn lên lịch, xem trước nội dung hoặc chỉnh sửa trước khi xác nhận.
               </span>
             </div>
 
@@ -284,18 +426,41 @@ export default function BulkUpload() {
                 type="button"
                 className="button button-primary"
                 onClick={handleConfirmAndSchedule}
-                disabled={confirming}
+                disabled={confirming || selectedTempIds.length === 0}
                 style={{
-                  background: 'linear-gradient(115deg, #10B981 0%, #059669 100%)',
+                  background: selectedTempIds.length > 0 ? 'linear-gradient(115deg, #10B981 0%, #059669 100%)' : '#94A3B8',
                   border: 0,
                   fontSize: 14,
                   fontWeight: 800,
-                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)'
+                  boxShadow: selectedTempIds.length > 0 ? '0 4px 14px rgba(16, 185, 129, 0.4)' : 'none',
+                  cursor: selectedTempIds.length > 0 ? 'pointer' : 'not-allowed'
                 }}
               >
                 <CheckCircle2 size={16} />
-                <span>{confirming ? 'Đang lên lịch...' : `Xác nhận & Lên lịch (${stagedPosts.length} bài)`}</span>
+                <span>{confirming ? 'Đang lên lịch...' : `Xác nhận & Lên lịch (${selectedTempIds.length} bài đã chọn)`}</span>
               </button>
+            </div>
+          </div>
+
+          {/* Quick Selection Toolbar */}
+          <div style={{ padding: '8px 16px', background: '#FAFBFC', borderBottom: '1px solid #EBECF0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                style={{ background: 'transparent', border: 0, color: '#FF6B00', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                {selectedTempIds.length === stagedPosts.length ? <CheckSquare size={16} /> : <Square size={16} />}
+                <span>{selectedTempIds.length === stagedPosts.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả bài'}</span>
+              </button>
+              <span style={{ color: '#6B778C' }}>|</span>
+              <span style={{ color: '#6B778C' }}>
+                Đã chọn: <strong style={{ color: '#172B4D' }}>{selectedTempIds.length}</strong> / {stagedPosts.length} bài
+              </span>
+            </div>
+
+            <div style={{ color: '#6B778C' }}>
+              💡 <em>Các bài không được tick chọn sẽ không đưa vào hàng đợi</em>
             </div>
           </div>
 
@@ -303,6 +468,15 @@ export default function BulkUpload() {
             <table className="report-table report-wide-table">
               <thead>
                 <tr>
+                  <th style={{ width: 44, textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={stagedPosts.length > 0 && selectedTempIds.length === stagedPosts.length}
+                      onChange={handleToggleSelectAll}
+                      style={{ cursor: 'pointer' }}
+                      title="Chọn tất cả"
+                    />
+                  </th>
                   <th style={{ width: 60 }}>Dòng</th>
                   <th style={{ width: 200 }}>Fanpage đích</th>
                   <th>Nội dung bài viết</th>
@@ -314,11 +488,28 @@ export default function BulkUpload() {
               </thead>
               <tbody>
                 {stagedPosts.map((post, idx) => {
+                  const isSelected = selectedTempIds.includes(post.tempId);
                   const mediaCount = (post.mediaLinks || []).length;
                   const commentCount = (post.comments || []).length;
 
                   return (
-                    <tr key={post.tempId} style={{ transition: 'background 0.2s' }}>
+                    <tr
+                      key={post.tempId}
+                      style={{
+                        background: isSelected ? 'rgba(255, 107, 0, 0.03)' : '#ffffff',
+                        transition: 'background 0.2s'
+                      }}
+                    >
+                      {/* Checkbox chọn từng bài */}
+                      <td style={{ textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectOne(post.tempId)}
+                          style={{ cursor: 'pointer', width: 16, height: 16 }}
+                        />
+                      </td>
+
                       <td>
                         <span style={{ fontWeight: 800, color: '#6B778C' }}>#{post.rowIndex || idx + 1}</span>
                       </td>
@@ -459,7 +650,6 @@ export default function BulkUpload() {
             overflow: 'hidden',
             boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)'
           }}>
-            {/* Header Modal */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #E2E8F0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Eye size={18} color="#FF6B00" />
@@ -474,7 +664,6 @@ export default function BulkUpload() {
               </button>
             </div>
 
-            {/* Nội dung mô phỏng Facebook */}
             <div style={{ padding: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <div style={{
@@ -498,12 +687,10 @@ export default function BulkUpload() {
                 </div>
               </div>
 
-              {/* Text Body */}
               <div style={{ fontSize: 14, color: '#1E293B', whiteSpace: 'pre-wrap', lineHeight: 1.5, marginBottom: 14 }}>
                 {previewPost.content}
               </div>
 
-              {/* Media Preview Links */}
               {(previewPost.mediaLinks || []).length > 0 && (
                 <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: 10, marginBottom: 14 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#475569', display: 'block', marginBottom: 6 }}>
@@ -517,7 +704,6 @@ export default function BulkUpload() {
                 </div>
               )}
 
-              {/* Seeding Comments Preview */}
               {(previewPost.comments || []).length > 0 && (
                 <div style={{ borderTop: '1px solid #E2E8F0', paddingTop: 12, marginTop: 12 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#64748B', display: 'block', marginBottom: 8 }}>
@@ -574,7 +760,6 @@ export default function BulkUpload() {
             display: 'flex',
             flexDirection: 'column'
           }}>
-            {/* Header Modal */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #E2E8F0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Edit3 size={18} color="#FF6B00" />
@@ -591,9 +776,7 @@ export default function BulkUpload() {
               </button>
             </div>
 
-            {/* Form Edit */}
             <form onSubmit={handleSaveEdit} style={{ padding: 20, overflowY: 'auto' }}>
-              {/* Fanpage */}
               <div className="form-item" style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#1E293B' }}>Fanpage đăng</label>
                 <select
@@ -616,7 +799,6 @@ export default function BulkUpload() {
                 </select>
               </div>
 
-              {/* Nội dung bài viết */}
               <div className="form-item" style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#1E293B' }}>Nội dung bài đăng</label>
                 <textarea
@@ -629,7 +811,6 @@ export default function BulkUpload() {
                 />
               </div>
 
-              {/* Lịch đăng */}
               <div className="form-item" style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#1E293B' }}>Thời gian đăng</label>
                 <input
@@ -641,7 +822,6 @@ export default function BulkUpload() {
                 />
               </div>
 
-              {/* Định dạng media */}
               <div className="form-item" style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#1E293B' }}>Định dạng bài</label>
                 <select

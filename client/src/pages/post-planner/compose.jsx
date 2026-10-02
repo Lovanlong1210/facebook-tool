@@ -58,6 +58,17 @@ export default function ComposePage() {
       .finally(() => setChannelLoading(false));
   }, []);
 
+  useEffect(() => {
+    try {
+      const aiDraft = sessionStorage.getItem('pageflow_draft_ai_content');
+      if (aiDraft) {
+        setContent(aiDraft);
+        sessionStorage.removeItem('pageflow_draft_ai_content');
+        setNotice('✨ Đã tự động nạp nội dung được tạo từ AI Studio!');
+      }
+    } catch {}
+  }, []);
+
   const createScheduledPost = async () => {
     if (!selectedPageId) {
       setNotice('Vui lòng chọn một Fanpage trước khi xuất bản.');
