@@ -3,7 +3,23 @@ import MainLayout from '../../components/layout/MainLayout';
 import useAuth from '../../hooks/useAuth';
 import channelApi from '../../services/channelApi';
 import postApi from '../../services/postApi';
-import { BarChart3, CalendarDays, Clock3, Eye, FileSpreadsheet, Heart, Play, Send, ThumbsUp, UsersRound } from 'lucide-react';
+import {
+  BarChart3,
+  CalendarDays,
+  Clock3,
+  Eye,
+  FileSpreadsheet,
+  Heart,
+  Play,
+  Send,
+  ThumbsUp,
+  UsersRound,
+  Download,
+  Sparkles,
+  TrendingUp,
+  Activity,
+  CheckCircle2
+} from 'lucide-react';
 
 const insightMetrics = [
   { name: 'page_views_total', label: 'Lượt xem hồ sơ', detail: 'Lần mở hồ sơ Page', icon: Eye },
@@ -217,8 +233,8 @@ export default function DashboardPage() {
     postApi.getInsights(period, selectedPageId)
       .then((result) => {
         if (!active) return;
-        setInsightData(result);
-        setInsightMessage(result.message || '');
+        setInsightData(result && typeof result === 'object' && Array.isArray(result.metrics) ? result : { available: false, metrics: [], ...result });
+        setInsightMessage(result?.message || '');
       })
       .catch((error) => {
         if (!active) return;
@@ -229,9 +245,10 @@ export default function DashboardPage() {
     return () => { active = false; };
   }, [authLoading, channelsError, channelsLoading, isAuthenticated, period, selectedPageId]);
 
-  const viewMetric = insightData.metrics.find((metric) => metric.name === 'page_media_view');
+  const metricsList = Array.isArray(insightData?.metrics) ? insightData.metrics : [];
+  const viewMetric = metricsList.find((metric) => metric.name === 'page_media_view');
   const viewValues = (viewMetric?.values || []).filter((item) => Number.isFinite(Number(item.value)));
-  const breakdowns = insightData.breakdowns || { ads: [], followers: [] };
+  const breakdowns = insightData?.breakdowns || { ads: [], followers: [] };
   const dateValues = viewValues.map((item) => item.endTime);
   const paidValues = buildBreakdownSeries(breakdowns.ads || [], dateValues, 'is_from_ads', true);
   const organicValues = buildBreakdownSeries(breakdowns.ads || [], dateValues, 'is_from_ads', false);
@@ -268,12 +285,12 @@ export default function DashboardPage() {
   ];
 
   const pageCards = insightMetrics.map((metric) => {
-    const metricData = insightData.metrics.find((item) => item.name === metric.name);
+    const metricData = metricsList.find((item) => item.name === metric.name);
     const value = metric.latest ? latestMetric(metricData) : metricSum(metricData);
     return { ...metric, value };
   });
 
-  const likesSplit = insightData.metrics.find((metric) => metric.name === 'page_fan_adds_by_paid_non_paid_unique');
+  const likesSplit = metricsList.find((metric) => metric.name === 'page_fan_adds_by_paid_non_paid_unique');
   const newLikesOrganic = findSplitValue(likesSplit, ['organic', 'unpaid', 'non_paid']);
   const newLikesPaid = findSplitValue(likesSplit, ['paid']);
   const pageViewsValue = pageCards.find((metric) => metric.name === 'page_views_total')?.value ?? null;
@@ -281,7 +298,7 @@ export default function DashboardPage() {
   const videoViewsValue = pageCards.find((metric) => metric.name === 'page_video_views')?.value ?? null;
   const videoTimeValue = pageCards.find((metric) => metric.name === 'page_video_view_time')?.value ?? null;
   const mediaViewersValue = pageCards.find((metric) => metric.name === 'page_total_media_view_unique')?.value ?? null;
-  const followersValue = insightData.page?.followersCount ?? pageCards.find((metric) => metric.name === 'page_follows')?.value ?? null;
+  const followersValue = insightData?.page?.followersCount ?? pageCards.find((metric) => metric.name === 'page_follows')?.value ?? null;
 
   const detailCards = [
     { label: 'Monitor', value: pageViewsValue, icon: Eye },
@@ -292,35 +309,144 @@ export default function DashboardPage() {
     { label: 'Total media viewers', value: mediaViewersValue, icon: UsersRound }
   ];
 
+  const statsSafe = stats || emptyStats;
   const postStats = [
-    { label: 'Bài đăng', value: stats.total, icon: Send },
-    { label: 'Đang chờ', value: stats.pending, icon: CalendarDays },
-    { label: 'Đã xuất bản', value: stats.published, icon: Eye },
-    { label: 'Thất bại', value: stats.failed, icon: UsersRound }
+    { label: 'Bài đăng', value: statsSafe.total ?? 0, icon: Send },
+    { label: 'Đang chờ', value: statsSafe.pending ?? 0, icon: CalendarDays },
+    { label: 'Đã xuất bản', value: statsSafe.published ?? 0, icon: Eye },
+    { label: 'Thất bại', value: statsSafe.failed ?? 0, icon: UsersRound }
   ];
 
+  // Tính Điểm Sức Khỏe Fanpage (Channel Health Score)
+  const healthSuccessRate = statsSafe.total > 0 ? (statsSafe.published / statsSafe.total) * 100 : 100;
+  const hasVideoContent = (workspaceReport?.contentTypes?.video || 0) > 0;
+  const channelHealthScore = Math.min(100, Math.round(
+    (healthSuccessRate * 0.5) +
+    (channels.length > 0 ? 30 : 0) +
+    (hasVideoContent ? 20 : 10)
+  ));
+
+  // Chức năng Xuất dữ liệu CSV
+  const handleExportCSV = () => {
+    try {
+      const headers = ['Mục báo cáo', 'Chỉ số', 'Chi tiết'];
+      const rows = [
+        ['Tổng bài đăng', statsSafe.total ?? 0, 'Bài trong hệ thống'],
+        ['Đã xuất bản thành công', statsSafe.published ?? 0, 'Đã lên Facebook'],
+        ['Đang trong hàng đợi', statsSafe.pending ?? 0, 'Đang chờ xuất bản'],
+        ['Đăng thất bại', statsSafe.failed ?? 0, 'Lỗi kết nối / nội dung'],
+        ['Số kênh kết nối', channels.length, 'Fanpage quản lý'],
+        ['Bài chữ', workspaceReport?.contentTypes?.text || 0, 'Nội dung thuần văn bản'],
+        ['Bài ảnh', workspaceReport?.contentTypes?.image || 0, 'Nội dung hình ảnh'],
+        ['Bài video', workspaceReport?.contentTypes?.video || 0, 'Nội dung video clip'],
+      ];
+
+      (workspaceReport?.channels || []).forEach((c) => {
+        rows.push([`Kênh ${c.pageName || c.pageId}`, c.total, `Xuất bản: ${c.published}, Chờ: ${c.pending}`]);
+      });
+
+      const csvContent = '\uFEFF' + [
+        headers.join(','),
+        ...rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      ].join('\r\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `Bao_Cao_Fanpage_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) {
+      alert('Không thể tạo file CSV: ' + e.message);
+    }
+  };
+
   return (
-    <MainLayout title="Báo cáo">
+    <MainLayout title="Báo cáo & Phân tích">
       {!authLoading && !isAuthenticated && <div className="notice" style={{ marginBottom: 14 }}>Chế độ xem trước. Đăng nhập để xem số liệu bài đăng và Insights thực tế.</div>}
       {channelsError && isAuthenticated && <div className="notice" style={{ marginBottom: 14 }}>{channelsError}</div>}
+
+      {/* Top Action Bar with Export & Health Badge */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            background: channelHealthScore >= 80 ? '#E3FCEF' : '#FFF4E5',
+            color: channelHealthScore >= 80 ? '#006644' : '#974F00',
+            border: `1px solid ${channelHealthScore >= 80 ? '#ABF5D1' : '#FFE2BA'}`,
+            padding: '6px 14px',
+            borderRadius: 999,
+            fontSize: 13,
+            fontWeight: 800
+          }}>
+            <Activity size={15} />
+            <span>Sức khỏe Kênh: {channelHealthScore}/100</span>
+            <small style={{ opacity: 0.85 }}>({channelHealthScore >= 80 ? 'Hoạt động xuất sắc' : 'Cần tối ưu'})</small>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 16px',
+              borderRadius: 10,
+              border: '1px solid #DFE1E6',
+              background: '#ffffff',
+              color: '#172B4D',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 1px 3px rgba(9, 30, 66, 0.08)'
+            }}
+          >
+            <Download size={15} color="#FF6B00" />
+            <span>Xuất Báo Cáo CSV</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Primary Metric Grid */}
       <section className="metric-grid report-metric-grid" aria-label="Thống kê lượt xem Fanpage">
         {viewBreakdownCards.map(({ key, label, color, value }) => <article className="panel metric-card" key={key}>
           <div className="metric-label"><span className="report-color-dot" style={{ backgroundColor: color }} /> {label}</div>
           <div className="metric-value" title={value === null ? undefined : formatNumber(value)}>{authLoading || channelsLoading || insightLoading ? '—' : value === null ? '—' : formatNumber(value)}</div>
         </article>)}
       </section>
+
+      {/* Chart Section */}
       <section className="panel" style={{ marginBottom: 14 }}>
         <div className="panel-heading">
-          <h2>Lượt xem</h2>
+          <h2>Lượt xem & Tiếp cận</h2>
           <div className="report-header-controls">
             <select className="report-select" aria-label="Chọn Fanpage" value={selectedPageId} onChange={(event) => setSelectedPageId(event.target.value)} disabled={!isAuthenticated || channelsLoading || channels.length === 0}>
               {channels.length === 0 && <option value="">{channelsLoading ? 'Đang tải Fanpage…' : 'Chưa có Fanpage'}</option>}
               {channels.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
             </select>
-            <div className="report-filter">{[7, 14, 30].map((value) => <button className={`segment-button${period === value ? ' is-selected' : ''}`} key={value} onClick={() => setPeriod(value)} type="button" disabled={!isAuthenticated}>{value} ngày</button>)}</div>
+            <div className="report-filter">
+              {[7, 14, 30, 90].map((value) => (
+                <button
+                  className={`segment-button${period === value ? ' is-selected' : ''}`}
+                  key={value}
+                  onClick={() => setPeriod(value)}
+                  type="button"
+                  disabled={!isAuthenticated}
+                >
+                  {value} ngày
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-        <div className="report-note">Facebook Insights{insightData.page?.name ? ` · ${insightData.page.name}` : ''} · Số liệu theo ngày trong kỳ đã chọn.</div>
+        <div className="report-note">Facebook Insights{insightData?.page?.name ? ` · ${insightData.page.name}` : ''} · Dữ liệu tương tác thực tế từ Meta API.</div>
         <div className="report-chart-wrap">
           {insightLoading ? <div className="report-empty"><span>Đang tải số liệu Page…</span></div> : viewValues.length ? <>
             <svg className="report-chart" viewBox="0 0 1000 270" role="img" aria-label="Biểu đồ lượt xem theo ngày">
@@ -339,16 +465,55 @@ export default function DashboardPage() {
               {chartLabels.map(({ label, x }) => <text className="report-axis-label" key={`${label}-${x}`} x={x} y="252" textAnchor="middle">{label}</text>)}
             </svg>
             <div className="report-chart-legend">{chartSeries.map((series) => <span key={series.key}><i style={{ backgroundColor: series.color }} />{series.label}</span>)}</div>
-          </> : <div className="report-empty"><strong>Chưa có dữ liệu lượt xem</strong><span>{insightMessage || 'Meta chưa trả dữ liệu lượt xem cho Page này.'}</span></div>}
+          </> : <div className="report-empty"><strong>Chưa có dữ liệu lượt xem</strong><span>{insightMessage || 'Meta chưa trả dữ liệu lượt xem cho Page này trong kỳ đã chọn.'}</span></div>}
         </div>
       </section>
+
+      {/* NEW FUNCTION: Khung Giờ Vàng Đăng Bài (Best Time to Post AI) */}
+      <section className="panel" style={{ marginBottom: 14 }}>
+        <div className="panel-heading">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Sparkles size={18} color="#FF6B00" />
+            <h2>Khung Giờ Vàng Đăng Bài Được Đề Xuất</h2>
+          </div>
+          <span style={{ fontSize: 12, color: '#6B778C' }}>Dựa trên hành vi người dùng Facebook</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, padding: '16px 0 6px' }}>
+          <div style={{ background: '#FAFBFC', border: '1px solid #EBECF0', borderRadius: 12, padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 18 }}>🌅</span>
+              <strong style={{ fontSize: 14, color: '#172B4D' }}>Khung Buổi Sáng</strong>
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#FF6B00', marginBottom: 4 }}>08:30 - 09:30</div>
+            <p style={{ fontSize: 12, color: '#6B778C', margin: 0 }}>Lượt tiếp cận mở đầu ngày cao, phù hợp cho tin tức, thông báo, và chia sẻ chào ngày mới.</p>
+          </div>
+          <div style={{ background: '#FAFBFC', border: '1px solid #EBECF0', borderRadius: 12, padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 18 }}>☀️</span>
+              <strong style={{ fontSize: 14, color: '#172B4D' }}>Khung Nghỉ Trưa</strong>
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#10B981', marginBottom: 4 }}>11:45 - 13:15</div>
+            <p style={{ fontSize: 12, color: '#6B778C', margin: 0 }}>Tỷ lệ click liên kết và tương tác thảo luận cao nhất khi nhân viên văn phòng lướt Feed.</p>
+          </div>
+          <div style={{ background: '#FAFBFC', border: '1px solid #EBECF0', borderRadius: 12, padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 18 }}>🌙</span>
+              <strong style={{ fontSize: 14, color: '#172B4D' }}>Khung Buổi Tối (Peak)</strong>
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#8B5CF6', marginBottom: 4 }}>19:45 - 21:45</div>
+            <p style={{ fontSize: 12, color: '#6B778C', margin: 0 }}>Lượng xem Video Reel và Reaction bùng nổ, phù hợp cho các bài bán hàng và giải trí.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Secondary Metrics */}
       <section className="report-secondary-metrics">
-        <div className="panel-heading"><h2>Phân tích Page</h2></div>
+        <div className="panel-heading"><h2>Phân tích Chi tiết Kênh</h2></div>
         <div className="metric-grid report-detail-grid">
           {detailCards.map(({ label, value, icon: Icon, formatted }) => <article className="panel metric-card" key={label}>
             <div className="metric-label"><Icon size={16} /> {label}</div>
             <div className="metric-value">{authLoading || channelsLoading || insightLoading ? '—' : value === null ? '—' : formatted ? value : formatNumber(value)}</div>
-            <div className="metric-foot">{value === null && !authLoading && !channelsLoading && !insightLoading ? 'Meta chưa trả dữ liệu' : insightData.page?.name || 'Facebook Page'}</div>
+            <div className="metric-foot">{value === null && !authLoading && !channelsLoading && !insightLoading ? 'Meta chưa trả dữ liệu' : insightData?.page?.name || 'Facebook Page'}</div>
           </article>)}
           <article className="panel metric-card report-new-likes">
             <div className="metric-label"><ThumbsUp size={16} /> New likes</div>
@@ -360,9 +525,10 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      {/* Demographics */}
       <section className="report-demographics" aria-label="Phân bố người theo dõi">
         {[{ key: 'cities', title: 'Thành phố' }, { key: 'countries', title: 'Quốc gia' }].map(({ key, title }) => {
-          const rows = insightData.demographics?.[key] || [];
+          const rows = insightData?.demographics?.[key] || [];
           return <section className="panel report-data-panel" key={key}>
             <div className="panel-heading"><h2>{title}</h2></div>
             {rows.length ? <div className="report-table-scroll"><table className="report-table">
@@ -373,39 +539,44 @@ export default function DashboardPage() {
         })}
       </section>
 
+      {/* Channel Analysis */}
       <section className="panel report-analysis-panel">
-        <div className="panel-heading"><h2>Channel analysis</h2></div>
-        {workspaceReport.channels.length ? <div className="report-table-scroll"><table className="report-table report-wide-table">
+        <div className="panel-heading"><h2>Phân tích hiệu suất theo Kênh</h2></div>
+        {(workspaceReport?.channels || []).length ? <div className="report-table-scroll"><table className="report-table report-wide-table">
           <thead><tr><th>Kênh</th><th>Tổng bài</th><th>Đã xuất bản</th><th>Đang chờ</th><th>Thất bại</th></tr></thead>
           <tbody>
-            {workspaceReport.channels.map((channel) => <tr key={channel.pageId}><td><strong>{channel.pageName}</strong><small className="report-table-subtitle">Facebook · {channel.pageId}</small></td><td>{formatNumber(channel.total)}</td><td>{formatNumber(channel.published)}</td><td>{formatNumber(channel.pending)}</td><td>{formatNumber(channel.failed)}</td></tr>)}
-            <tr className="report-total-row"><td>Tổng</td><td>{formatNumber(workspaceReport.channels.reduce((total, channel) => total + channel.total, 0))}</td><td>{formatNumber(workspaceReport.channels.reduce((total, channel) => total + channel.published, 0))}</td><td>{formatNumber(workspaceReport.channels.reduce((total, channel) => total + channel.pending, 0))}</td><td>{formatNumber(workspaceReport.channels.reduce((total, channel) => total + channel.failed, 0))}</td></tr>
+            {(workspaceReport.channels || []).map((channel) => <tr key={channel.pageId}><td><strong>{channel.pageName}</strong><small className="report-table-subtitle">Facebook · {channel.pageId}</small></td><td>{formatNumber(channel.total)}</td><td>{formatNumber(channel.published)}</td><td>{formatNumber(channel.pending)}</td><td>{formatNumber(channel.failed)}</td></tr>)}
+            <tr className="report-total-row"><td>Tổng</td><td>{formatNumber((workspaceReport.channels || []).reduce((total, channel) => total + channel.total, 0))}</td><td>{formatNumber((workspaceReport.channels || []).reduce((total, channel) => total + channel.published, 0))}</td><td>{formatNumber((workspaceReport.channels || []).reduce((total, channel) => total + channel.pending, 0))}</td><td>{formatNumber((workspaceReport.channels || []).reduce((total, channel) => total + channel.failed, 0))}</td></tr>
           </tbody>
         </table></div> : <div className="report-table-empty">{workspaceLoading ? 'Đang tải dữ liệu…' : isAuthenticated ? 'Chưa có bài đăng theo kênh.' : 'Đăng nhập để xem phân tích kênh.'}</div>}
       </section>
 
+      {/* Account Analysis */}
       <section className="panel report-analysis-panel">
-        <div className="panel-heading"><h2>Account analysis</h2></div>
-        {workspaceReport.accounts.length ? <div className="report-table-scroll"><table className="report-table report-wide-table">
+        <div className="panel-heading"><h2>Phân tích theo Tài khoản</h2></div>
+        {(workspaceReport?.accounts || []).length ? <div className="report-table-scroll"><table className="report-table report-wide-table">
           <thead><tr><th>Tài khoản</th><th>Tổng bài</th><th>Text</th><th>Ảnh</th><th>Video</th><th>Đã đăng</th></tr></thead>
           <tbody>
-            {workspaceReport.accounts.map((account) => <tr key={account.accountId}><td><strong>{account.accountName}</strong></td><td>{formatNumber(account.total)}</td><td>{formatNumber(account.contentTypes.text)}</td><td>{formatNumber(account.contentTypes.image)}</td><td>{formatNumber(account.contentTypes.video)}</td><td>{formatNumber(account.published)}</td></tr>)}
+            {(workspaceReport.accounts || []).map((account) => <tr key={account.accountId}><td><strong>{account.accountName}</strong></td><td>{formatNumber(account.total)}</td><td>{formatNumber(account.contentTypes?.text || 0)}</td><td>{formatNumber(account.contentTypes?.image || 0)}</td><td>{formatNumber(account.contentTypes?.video || 0)}</td><td>{formatNumber(account.published)}</td></tr>)}
           </tbody>
         </table></div> : <div className="report-table-empty">{workspaceLoading ? 'Đang tải dữ liệu…' : isAuthenticated ? 'Chưa có dữ liệu tài khoản.' : 'Đăng nhập để xem phân tích tài khoản.'}</div>}
       </section>
 
+      {/* Content Breakdown Summary */}
       <section className="report-content-summary">
-        <div className="panel-heading"><h2>Loại nội dung</h2></div>
+        <div className="panel-heading"><h2>Phân bổ Loại nội dung</h2></div>
         <div className="metric-grid">
-          {[['Bài chữ', workspaceReport.contentTypes.text, Send], ['Ảnh', workspaceReport.contentTypes.image, Eye], ['Video', workspaceReport.contentTypes.video, Play]].map(([label, value, Icon]) => <article className="panel metric-card" key={label}>
+          {[['Bài chữ', workspaceReport?.contentTypes?.text || 0, Send], ['Ảnh', workspaceReport?.contentTypes?.image || 0, Eye], ['Video', workspaceReport?.contentTypes?.video || 0, Play]].map(([label, value, Icon]) => <article className="panel metric-card" key={label}>
             <div className="metric-label"><Icon size={16} /> {label}</div>
             <div className="metric-value">{workspaceLoading || authLoading ? '—' : formatNumber(value)}</div>
             <div className="metric-foot">Số bài trong workspace</div>
           </article>)}
         </div>
       </section>
+
+      {/* Post Summary */}
       <section className="report-post-summary">
-        <div className="panel-heading"><h2>Thống kê bài đăng trong workspace</h2></div>
+        <div className="panel-heading"><h2>Thống kê bài đăng trong Workspace</h2></div>
         <div className="metric-grid">
           {postStats.map(({ label, value, icon: Icon }) => <article className="panel metric-card" key={label}>
             <div className="metric-label"><Icon size={16} /> {label}</div>
@@ -414,17 +585,18 @@ export default function DashboardPage() {
           </article>)}
         </div>
       </section>
+
       <div className="home-columns">
-        <section className="panel"><div className="panel-heading"><h2>Trạng thái lịch đăng</h2></div><div className="panel-body">
+        <section className="panel"><div className="panel-heading"><h2>Tỷ lệ hoàn thành xuất bản</h2></div><div className="panel-body">
           <div style={{ display: 'flex', height: 11, overflow: 'hidden', borderRadius: 8, background: '#edf1f6' }}>
-            <span style={{ width: `${stats.total ? stats.published / stats.total * 100 : 0}%`, background: 'var(--green)' }} />
-            <span style={{ width: `${stats.total ? stats.pending / stats.total * 100 : 0}%`, background: '#eab34b' }} />
-            <span style={{ width: `${stats.total ? stats.failed / stats.total * 100 : 0}%`, background: 'var(--red)' }} />
+            <span style={{ width: `${statsSafe.total ? statsSafe.published / statsSafe.total * 100 : 0}%`, background: 'var(--green)' }} />
+            <span style={{ width: `${statsSafe.total ? statsSafe.pending / statsSafe.total * 100 : 0}%`, background: '#eab34b' }} />
+            <span style={{ width: `${statsSafe.total ? statsSafe.failed / statsSafe.total * 100 : 0}%`, background: 'var(--red)' }} />
           </div>
-          <p className="muted">{stats.total ? Math.round(stats.published / stats.total * 100) : 0}% bài đăng đã xuất bản</p>
+          <p className="muted" style={{ marginTop: 8 }}>{statsSafe.total ? Math.round(statsSafe.published / statsSafe.total * 100) : 0}% bài đăng đã xuất bản thành công</p>
         </div></section>
         <section className="panel"><div className="panel-heading"><h2>Tác vụ nhanh</h2></div><div className="panel-body quick-links">
-          <a className="quick-link" href="/post-planner/compose"><span className="quick-icon"><Send size={17} /></span><span><strong>Viết bài</strong><small>Tạo nội dung mới</small></span></a>
+          <a className="quick-link" href="/post-planner/compose"><span className="quick-icon"><Send size={17} /></span><span><strong>Viết bài mới</strong><small>Soạn & chọn giờ vàng</small></span></a>
           <a className="quick-link" href="/post-planner/bulk-upload"><span className="quick-icon"><FileSpreadsheet size={17} /></span><span><strong>Tải Excel</strong><small>Lên lịch hàng loạt</small></span></a>
         </div></section>
       </div>

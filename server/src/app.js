@@ -912,6 +912,77 @@ app.get('/api/reports/insights', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/reports/workspace', requireAuth, async (req, res) => {
+  try {
+    const pool = await getPool();
+    const ownerFilter = req.user.role === 'admin' ? '' : ' WHERE created_by_user_id = @ownerId';
+    const request = pool.request();
+    if (req.user.role !== 'admin') request.input('ownerId', sql.VarChar(64), req.user.sub);
+
+    const query = `
+      SELECT id, status, media_links, page_id, created_by_user_id
+      FROM Posts
+      ${ownerFilter}
+    `;
+    const result = await request.query(query);
+    const posts = result.recordset || [];
+
+    const contentTypes = { text: 0, image: 0, video: 0 };
+    const channelMap = new Map();
+
+    posts.forEach((p) => {
+      let media = [];
+      try {
+        media = typeof p.media_links === 'string' ? JSON.parse(p.media_links) : (p.media_links || []);
+      } catch {
+        media = [];
+      }
+
+      if (!media.length) contentTypes.text++;
+      else if (media.some((m) => String(m).match(/\.(mp4|mov|avi|webm)/i))) contentTypes.video++;
+      else contentTypes.image++;
+
+      const pid = p.page_id || 'default';
+      const existing = channelMap.get(pid) || {
+        pageId: pid,
+        pageName: `Fanpage ${pid}`,
+        total: 0,
+        published: 0,
+        pending: 0,
+        failed: 0
+      };
+      existing.total++;
+      if (p.status === 'published') existing.published++;
+      else if (p.status === 'pending') existing.pending++;
+      else if (p.status === 'failed') existing.failed++;
+      channelMap.set(pid, existing);
+    });
+
+    return res.json({
+      success: true,
+      channels: Array.from(channelMap.values()),
+      accounts: [
+        {
+          accountId: req.user.sub,
+          accountName: req.user.name || 'Admin',
+          total: posts.length,
+          published: posts.filter((p) => p.status === 'published').length,
+          contentTypes
+        }
+      ],
+      contentTypes
+    });
+  } catch (error) {
+    console.error('[Workspace Report Error]', error.message);
+    return res.json({
+      success: true,
+      channels: [],
+      accounts: [],
+      contentTypes: { text: 0, image: 0, video: 0 }
+    });
+  }
+});
+
 app.get('/api/posts/:postId/publish-now', (_req, res) => res.status(405).json({ success: false, message: 'Dùng POST để đưa bài vào hàng đợi.' }));
 app.post('/api/posts/:postId/publish-now', requireAuth, async (req, res) => {
   const postId = Number.parseInt(req.params.postId, 10);

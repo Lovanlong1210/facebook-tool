@@ -12,8 +12,13 @@ export const postApi = {
     return response.data;
   },
 
-  getInsights: async (days = 14) => {
-    const response = await client.get('/reports/insights', { params: { days } });
+  getInsights: async (days = 14, pageId = '') => {
+    const response = await client.get('/reports/insights', { params: { days, pageId } });
+    return response.data;
+  },
+
+  getWorkspaceReport: async () => {
+    const response = await client.get('/reports/workspace');
     return response.data;
   },
 
