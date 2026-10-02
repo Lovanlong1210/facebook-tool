@@ -51,6 +51,18 @@ export const postApi = {
     return response.data;
   },
 
+  parseExcel: async (formData) => {
+    const response = await client.post('/posts/parse-excel', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  confirmBulkPosts: async (posts) => {
+    const response = await client.post('/posts/bulk-confirm', { posts });
+    return response.data;
+  },
+
   templateUrl: `${API_BASE_URL}/posts/template`,
 
   triggerPostNow: async (postId) => {

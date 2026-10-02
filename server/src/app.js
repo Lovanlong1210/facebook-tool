@@ -1095,6 +1095,130 @@ app.put('/api/posts/:postId', requireAuth, async (req, res) => {
   }
 });
 
+// 1. Phân tích file Excel và trả về danh sách Preview để người dùng xem, sửa, xoá
+app.post('/api/posts/parse-excel', requireAuth, memoryUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'Vui lòng chọn file Excel!' });
+    const parsedPosts = parseBulkExcel(req.file.buffer);
+    const connectedPages = await getConnectedPages(req.user.sub);
+    const defaultPageId = connectedPages[0]?.id || '';
+    const defaultPageName = connectedPages[0]?.name || 'Fanpage mặc định';
+
+    const postsWithMeta = parsedPosts.map((post, idx) => {
+      let page = connectedPages.find((p) => String(p.id) === String(post.pageId));
+      if (!page && connectedPages.length > 0) page = connectedPages[0];
+      return {
+        tempId: 'draft_' + Date.now() + '_' + idx,
+        rowIndex: post.rowIndex,
+        pageId: page ? String(page.id) : (post.pageId || defaultPageId),
+        pageName: page ? page.name : (post.pageId ? `Page ${post.pageId}` : defaultPageName),
+        content: post.content || '',
+        mediaType: post.mediaType || 'text',
+        mediaLinks: Array.isArray(post.mediaLinks) ? post.mediaLinks : [],
+        mediaThumb: post.mediaThumb || null,
+        scheduledAt: post.scheduledAt ? new Date(post.scheduledAt).toISOString() : new Date(Date.now() + 3600000).toISOString(),
+        comments: (post.comments || []).map((c, cIdx) => ({
+          commentIndex: c.commentIndex || cIdx + 1,
+          content: c.content || '',
+          delayMinutes: Number.isFinite(c.delayMinutes) ? c.delayMinutes : 0,
+          mediaUrl: c.mediaUrl || null
+        }))
+      };
+    });
+
+    return res.json({
+      success: true,
+      total: postsWithMeta.length,
+      posts: postsWithMeta,
+      connectedPages: connectedPages.map((p) => ({ id: String(p.id), name: p.name }))
+    });
+  } catch (error) {
+    console.error('[Parse Excel Error]', error.message);
+    return res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// 2. Xác nhận danh sách bài đã duyệt từ người dùng và chính thức xếp lịch
+app.post('/api/posts/bulk-confirm', requireAuth, async (req, res) => {
+  const { posts } = req.body;
+  if (!Array.isArray(posts) || posts.length === 0) {
+    return res.status(400).json({ success: false, message: 'Danh sách bài đăng rỗng.' });
+  }
+
+  try {
+    await ensurePostOwnershipSchema();
+    const pool = await getPool();
+    const connectedPages = await getConnectedPages(req.user.sub);
+    const connectedPageIds = new Set(connectedPages.map((page) => String(page.id)));
+    const defaultPageId = connectedPages[0]?.id;
+
+    const createdIds = [];
+    const errors = [];
+
+    for (let index = 0; index < posts.length; index++) {
+      const post = posts[index];
+      const transaction = new sql.Transaction(pool);
+      try {
+        await transaction.begin();
+        const pageId = String(post.pageId || defaultPageId || '');
+        if (!connectedPageIds.has(pageId) && connectedPages.length > 0) {
+          throw new Error(`Page ${pageId} chưa được kết nối.`);
+        }
+        const scheduledTime = post.scheduledAt ? new Date(post.scheduledAt) : new Date();
+
+        const inserted = await new sql.Request(transaction)
+          .input('pageId', sql.VarChar, pageId)
+          .input('ownerId', sql.VarChar(64), req.user.sub)
+          .input('content', sql.NVarChar, post.content || '')
+          .input('mediaType', sql.VarChar, post.mediaType || 'text')
+          .input('mediaLinks', sql.NVarChar, JSON.stringify(post.mediaLinks || []))
+          .input('mediaThumb', sql.VarChar, post.mediaThumb || null)
+          .input('scheduledAt', sql.DateTime2, scheduledTime)
+          .input('status', sql.VarChar, 'pending')
+          .query('INSERT INTO Posts (page_id,content,media_type,media_links,media_thumb,scheduled_at,status,created_by_user_id) OUTPUT INSERTED.id VALUES (@pageId,@content,@mediaType,@mediaLinks,@mediaThumb,@scheduledAt,@status,@ownerId);');
+
+        const postId = inserted.recordset[0].id;
+
+        if (Array.isArray(post.comments)) {
+          for (const comment of post.comments) {
+            if (!comment.content || !comment.content.trim()) continue;
+            await new sql.Request(transaction)
+              .input('postId', sql.Int, postId)
+              .input('commentIndex', sql.Int, comment.commentIndex || 1)
+              .input('content', sql.NVarChar, comment.content.trim())
+              .input('delay', sql.Int, Number.parseInt(comment.delayMinutes, 10) || 0)
+              .input('mediaUrl', sql.VarChar, comment.mediaUrl || null)
+              .query("INSERT INTO PostComments (post_id,comment_index,content,delay_minutes,media_url,status) VALUES (@postId,@commentIndex,@content,@delay,@mediaUrl,'pending');");
+          }
+        }
+
+        await transaction.commit();
+
+        try {
+          await addPostToQueue(postId, scheduledTime);
+          createdIds.push(postId);
+        } catch (queueErr) {
+          await pool.request().input('id', sql.Int, postId).query("UPDATE Posts SET status='failed' WHERE id=@id");
+          errors.push({ row: index + 1, message: queueErr.message });
+        }
+      } catch (err) {
+        await transaction.rollback().catch(() => {});
+        errors.push({ row: index + 1, message: err.message });
+      }
+    }
+
+    return res.json({
+      success: errors.length === 0,
+      data: createdIds,
+      errors,
+      message: `Đã xác nhận và lên lịch thành công ${createdIds.length}/${posts.length} bài đăng.`
+    });
+  } catch (error) {
+    console.error('[Bulk Confirm Error]', error.message);
+    return res.status(500).json({ success: false, message: 'Lỗi xác nhận: ' + error.message });
+  }
+});
+
 app.post('/api/posts/bulk-upload', requireAuth, memoryUpload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'Vui lòng upload file Excel.' });
