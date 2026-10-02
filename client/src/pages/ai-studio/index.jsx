@@ -72,7 +72,7 @@ const PROVIDERS = [
     id: 'gemini',
     name: 'Google Gemini',
     badge: 'Miễn phí & Rất thông minh (Khuyên dùng)',
-    defaultModel: 'gemini-1.5-flash',
+    defaultModel: 'gemini-3.5-flash-lite',
     keyHelp: 'Lấy API Key Gemini miễn phí tại aistudio.google.com',
     keyUrl: 'https://aistudio.google.com/app/apikey'
   },
@@ -115,7 +115,7 @@ export default function AIStudioPage() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: 'Xin chào! Tôi là Trợ lý AI Content Marketing & Chăm sóc khách hàng. Tôi có thể giúp bạn viết bài theo đúng ngành hàng, lên kịch bản Video Reel, tạo hashtag thịnh hành và trả lời mọi thắc mắc của bạn một cách tự nhiên. Bạn muốn tạo nội dung gì hôm nay?'
+      text: 'Xin chào! Tôi là Trợ lý AI Content Marketing & Chăm sóc khách hàng (được kết nối với Google Gemini AI). Tôi đã sẵn sàng đồng hành cùng bạn sáng tạo nội dung độc đáo, viết bài bán hàng theo đúng ngành nghề và giải đáp mọi thắc mắc. Bạn muốn tôi hỗ trợ chủ đề gì hôm nay?'
     }
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
@@ -125,11 +125,12 @@ export default function AIStudioPage() {
   const messagesEndRef = useRef(null);
 
   // Cấu hình AI Agent
+  const [serverStatus, setServerStatus] = useState(null);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [aiConfig, setAiConfig] = useState({
     provider: 'gemini',
     apiKey: '',
-    model: 'gemini-1.5-flash',
+    model: 'gemini-3.5-flash-lite',
     baseUrl: '',
     systemPrompt: ''
   });
@@ -137,8 +138,16 @@ export default function AIStudioPage() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
-  // Load cấu hình từ localStorage khi khởi tạo
+  // Load trạng thái từ server & cấu hình từ localStorage khi khởi tạo
   useEffect(() => {
+    aiApi.status()
+      .then((res) => {
+        if (res && res.configured) {
+          setServerStatus(res);
+        }
+      })
+      .catch(() => {});
+
     try {
       const saved = localStorage.getItem('pageflow_ai_agent_config');
       if (saved) {
@@ -279,8 +288,11 @@ export default function AIStudioPage() {
     }
   };
 
-  const isAgentConnected = Boolean(aiConfig.apiKey && aiConfig.apiKey.trim().length > 10);
-  const currentProviderObj = PROVIDERS.find((p) => p.id === aiConfig.provider);
+  const isAgentConnected = Boolean((aiConfig.apiKey && aiConfig.apiKey.trim().length > 10) || serverStatus?.configured);
+  const currentProviderObj = PROVIDERS.find((p) => p.id === (aiConfig.apiKey ? aiConfig.provider : 'gemini'));
+  const agentDisplayName = (aiConfig.apiKey && aiConfig.apiKey.trim().length > 10)
+    ? `${currentProviderObj?.name} (${aiConfig.model})`
+    : (serverStatus?.configured ? `${serverStatus.provider} (${serverStatus.model})` : 'Smart Engine v3.0');
 
   return (
     <MainLayout title="AI Marketing Studio & Chatbot Agent">
@@ -319,7 +331,7 @@ export default function AIStudioPage() {
               </button>
             </div>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
-              {isAgentConnected ? `${currentProviderObj?.name} (${aiConfig.model})` : 'Smart Engine v3.0'}
+              {agentDisplayName}
             </div>
             <p style={{ fontSize: 11, color: '#64748b', margin: '4px 0 8px', lineHeight: 1.3 }}>
               {isAgentConnected
@@ -453,10 +465,10 @@ export default function AIStudioPage() {
               </div>
               <div>
                 <strong style={{ fontSize: 15, color: '#0F172A', display: 'block' }}>
-                  {isAgentConnected ? `Agent: ${currentProviderObj?.name}` : 'AI Marketing Assistant'}
+                  {isAgentConnected ? `Agent: ${agentDisplayName}` : 'AI Marketing Assistant'}
                 </strong>
                 <span style={{ fontSize: 11, color: isAgentConnected ? '#059669' : '#10B981', fontWeight: 700 }}>
-                  ● {isAgentConnected ? `Đang kết nối: ${aiConfig.model}` : 'Sẵn sàng sáng tạo nội dung đa ngành'}
+                  ● {isAgentConnected ? 'Đã kết nối trực tiếp mô hình AI' : 'Sẵn sàng sáng tạo nội dung đa ngành'}
                 </span>
               </div>
             </div>

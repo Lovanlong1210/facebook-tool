@@ -324,35 +324,53 @@ app.post('/api/media', requireAuth, handleMediaUpload, (req, res) => {
 });
 
 app.get('/api/ai/status', requireAuth, (_req, res) => {
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.AI_API_KEY;
+  const isGemini = Boolean(geminiKey && (geminiKey.startsWith('AQ.') || geminiKey.startsWith('AIzaSy')));
   const hasKey = Boolean(process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY);
   return res.json({
     success: true,
-    configured: true,
-    provider: hasKey ? 'External LLM API' : 'PageFlow Smart Marketing Engine',
-    model: hasKey ? (process.env.AI_MODEL || 'GPT-4o / Gemini') : 'PageFlow Content AI v3.0'
+    configured: hasKey,
+    provider: hasKey ? (isGemini ? 'Google Gemini' : 'OpenAI / LLM') : 'PageFlow Smart Marketing Engine',
+    model: process.env.AI_MODEL || (isGemini ? 'gemini-3.5-flash-lite' : 'gpt-4o-mini')
   });
 });
 
 app.post('/api/ai/test-connection', requireAuth, async (req, res) => {
   const { aiConfig } = req.body;
-  const provider = aiConfig?.provider || 'gemini';
-  const apiKey = (aiConfig?.apiKey || '').trim() || process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+  const apiKey = (aiConfig?.apiKey || '').trim() || process.env.AI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+  const isGeminiKey = Boolean(apiKey && (apiKey.startsWith('AQ.') || apiKey.startsWith('AIzaSy')));
+  const provider = aiConfig?.provider || (isGeminiKey ? 'gemini' : 'openai');
 
   if (!apiKey) {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập API Key để kiểm tra kết nối.' });
   }
 
   try {
-    if (provider === 'gemini' || apiKey.startsWith('AIzaSy')) {
-      const model = aiConfig?.model || 'gemini-1.5-flash';
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const response = await axios.post(geminiUrl, {
-        contents: [{ role: 'user', parts: [{ text: 'Trả lời đúng 4 từ: Kết nối thành công!' }] }]
-      }, { timeout: 15000 });
-      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        return res.json({ success: true, message: `Kết nối Google Gemini (${model}) thành công! Phản hồi: "${text.trim()}"` });
+    if (provider === 'gemini' || isGeminiKey) {
+      const candidateModels = [
+        aiConfig?.model || process.env.AI_MODEL || 'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
+        'gemini-3.6-flash',
+        'gemini-flash-latest'
+      ];
+
+      let lastError = null;
+      for (const model of candidateModels) {
+        try {
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const response = await axios.post(geminiUrl, {
+            contents: [{ role: 'user', parts: [{ text: 'Trả lời đúng 4 từ: Kết nối thành công!' }] }]
+          }, { timeout: 15000 });
+          const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            return res.json({ success: true, message: `Kết nối Google Gemini (${model}) thành công! Phản hồi: "${text.trim()}"` });
+          }
+        } catch (mErr) {
+          lastError = mErr;
+          continue;
+        }
       }
+      throw lastError || new Error('Không thể kết nối đến các model Gemini.');
     } else {
       const defaultBaseUrl = provider === 'deepseek'
         ? 'https://api.deepseek.com'
@@ -391,38 +409,46 @@ app.post('/api/ai/chat', requireAuth, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Tin nhắn không được để trống.' });
   }
 
-  const apiKey = (clientConfig.apiKey || '').trim() || process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
-  const provider = clientConfig.provider || (apiKey && apiKey.startsWith('AIzaSy') ? 'gemini' : (process.env.GEMINI_API_KEY ? 'gemini' : 'openai'));
+  const apiKey = (clientConfig.apiKey || '').trim() || process.env.AI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+  const isGeminiKey = Boolean(apiKey && (apiKey.startsWith('AQ.') || apiKey.startsWith('AIzaSy')));
+  const provider = clientConfig.provider || (isGeminiKey ? 'gemini' : (process.env.GEMINI_API_KEY ? 'gemini' : 'openai'));
 
   const rawHistory = Array.isArray(req.body.history) ? req.body.history : [];
   const systemPrompt = clientConfig.systemPrompt || `Bạn là chuyên gia Content Marketing & Trợ lý bán hàng Fanpage Facebook chuyên nghiệp, trò chuyện tự nhiên, dí dỏm, đa dạng văn phong (không rập khuôn). Tone giọng: ${tone}. Hãy phản hồi ngắn gọn hoặc chi tiết đúng với nhu cầu của người dùng, sử dụng emoji tinh tế, tạo bài đăng Facebook hấp dẫn khi được yêu cầu, giải đáp thắc mắc và tư vấn chiến lược marketing thực tế.`;
 
-  // 1. Google Gemini API
-  if (apiKey && (provider === 'gemini' || apiKey.startsWith('AIzaSy'))) {
-    try {
-      const model = clientConfig.model || 'gemini-1.5-flash';
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  // 1. Google Gemini API (AQ. hoặc AIzaSy)
+  if (apiKey && (provider === 'gemini' || isGeminiKey)) {
+    const candidateModels = [
+      clientConfig.model || process.env.AI_MODEL || 'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-flash-latest'
+    ];
 
-      const contents = [];
-      for (const h of rawHistory.slice(-8)) {
-        if (!h.content) continue;
-        contents.push({
-          role: h.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: String(h.content).slice(0, 2000) }]
-        });
-      }
+    const contents = [];
+    for (const h of rawHistory.slice(-8)) {
+      if (!h.content) continue;
       contents.push({
-        role: 'user',
-        parts: [{ text: `[Chỉ dẫn hệ thống]: ${systemPrompt}\n\n[Người dùng]: ${message}` }]
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: String(h.content).slice(0, 2000) }]
       });
+    }
+    contents.push({
+      role: 'user',
+      parts: [{ text: `[Chỉ dẫn hệ thống]: ${systemPrompt}\n\n[Người dùng]: ${message}` }]
+    });
 
-      const response = await axios.post(geminiUrl, { contents }, { timeout: 30000 });
-      const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (reply) {
-        return res.json({ success: true, reply, agent: `Google Gemini (${model})` });
+    for (const model of candidateModels) {
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const response = await axios.post(geminiUrl, { contents }, { timeout: 30000 });
+        const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (reply) {
+          return res.json({ success: true, reply, agent: `Google Gemini (${model})` });
+        }
+      } catch (geminiErr) {
+        console.warn(`[Gemini Model ${model} Warning]`, geminiErr.response?.data?.error?.message || geminiErr.message);
       }
-    } catch (geminiErr) {
-      console.warn('[Gemini Agent Error]', geminiErr.response?.data || geminiErr.message);
     }
   }
 
