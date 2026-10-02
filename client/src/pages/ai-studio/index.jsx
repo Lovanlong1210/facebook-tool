@@ -17,7 +17,17 @@ import {
   Calendar,
   Lightbulb,
   Zap,
-  HelpCircle
+  HelpCircle,
+  Settings,
+  Cpu,
+  Key,
+  Eye,
+  EyeOff,
+  ExternalLink,
+  CheckCircle2,
+  AlertCircle,
+  Sliders,
+  X
 } from 'lucide-react';
 import MainLayout from '../../components/layout/MainLayout';
 import aiApi from '../../services/aiApi';
@@ -57,12 +67,55 @@ const TONES = [
   { id: 'friendly', label: 'Thân thiện & Gần gũi ❤️' }
 ];
 
+const PROVIDERS = [
+  {
+    id: 'gemini',
+    name: 'Google Gemini',
+    badge: 'Miễn phí & Rất thông minh (Khuyên dùng)',
+    defaultModel: 'gemini-1.5-flash',
+    keyHelp: 'Lấy API Key Gemini miễn phí tại aistudio.google.com',
+    keyUrl: 'https://aistudio.google.com/app/apikey'
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI (ChatGPT)',
+    badge: 'GPT-4o / GPT-4o-mini',
+    defaultModel: 'gpt-4o-mini',
+    keyHelp: 'Lấy API Key tại platform.openai.com/api-keys',
+    keyUrl: 'https://platform.openai.com/api-keys'
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek AI',
+    badge: 'deepseek-chat (Chi phí siêu rẻ)',
+    defaultModel: 'deepseek-chat',
+    keyHelp: 'Lấy API Key tại platform.deepseek.com',
+    keyUrl: 'https://platform.deepseek.com'
+  },
+  {
+    id: 'groq',
+    name: 'Groq (Llama 3.3)',
+    badge: 'Phản hồi tức thì, siêu tốc',
+    defaultModel: 'llama-3.3-70b-versatile',
+    keyHelp: 'Lấy API Key tại console.groq.com',
+    keyUrl: 'https://console.groq.com/keys'
+  },
+  {
+    id: 'custom',
+    name: 'Custom Agent / Dify / Ollama',
+    badge: 'Tùy biến Endpoint API riêng',
+    defaultModel: 'custom-model',
+    keyHelp: 'Hỗ trợ OpenAI-compatible API hoặc Dify Agent',
+    keyUrl: ''
+  }
+];
+
 export default function AIStudioPage() {
   const router = useRouter();
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: 'Xin chào! Tôi là Trợ lý AI Content Marketing chuyên nghiệp của PageFlow. Tôi có thể giúp bạn viết bài bán hàng đỉnh cao, lên kịch bản Video Reel, tạo hashtag thịnh hành và kế hoạch nội dung tuần. Bạn muốn tạo nội dung gì hôm nay?'
+      text: 'Xin chào! Tôi là Trợ lý AI Content Marketing & Chăm sóc khách hàng. Tôi có thể giúp bạn viết bài theo đúng ngành hàng, lên kịch bản Video Reel, tạo hashtag thịnh hành và trả lời mọi thắc mắc của bạn một cách tự nhiên. Bạn muốn tạo nội dung gì hôm nay?'
     }
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
@@ -71,6 +124,30 @@ export default function AIStudioPage() {
   const [copiedIndex, setCopiedIndex] = useState(null);
   const messagesEndRef = useRef(null);
 
+  // Cấu hình AI Agent
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [aiConfig, setAiConfig] = useState({
+    provider: 'gemini',
+    apiKey: '',
+    model: 'gemini-1.5-flash',
+    baseUrl: '',
+    systemPrompt: ''
+  });
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  // Load cấu hình từ localStorage khi khởi tạo
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('pageflow_ai_agent_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setAiConfig((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {}
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -78,6 +155,63 @@ export default function AIStudioPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
+  const handleProviderChange = (providerId) => {
+    const p = PROVIDERS.find((item) => item.id === providerId);
+    setAiConfig((prev) => ({
+      ...prev,
+      provider: providerId,
+      model: p?.defaultModel || prev.model,
+      baseUrl: providerId === 'deepseek'
+        ? 'https://api.deepseek.com'
+        : providerId === 'groq'
+        ? 'https://api.groq.com/openai/v1'
+        : providerId === 'custom'
+        ? prev.baseUrl || 'http://localhost:11434/v1'
+        : ''
+    }));
+    setTestResult(null);
+  };
+
+  const handleTestConnection = async () => {
+    if (!aiConfig.apiKey.trim()) {
+      setTestResult({ success: false, message: 'Vui lòng nhập API Key trước khi kiểm tra!' });
+      return;
+    }
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const res = await aiApi.testConnection(aiConfig);
+      setTestResult({ success: true, message: res.message || 'Kết nối thành công!' });
+    } catch (err) {
+      setTestResult({
+        success: false,
+        message: err.response?.data?.message || err.message || 'Không thể kết nối tới Agent.'
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSaveConfig = (e) => {
+    e.preventDefault();
+    try {
+      localStorage.setItem('pageflow_ai_agent_config', JSON.stringify(aiConfig));
+      setShowConfigModal(false);
+      setTestResult(null);
+      // Thông báo vào chat
+      const providerObj = PROVIDERS.find((p) => p.id === aiConfig.provider);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          text: `✅ **Đã kết nối thành công với Agent: ${providerObj?.name || 'AI'} (${aiConfig.model})**!\nTừ bây giờ, mọi câu hỏi và yêu cầu của bạn sẽ được xử lý trực tiếp bởi Agent này với sự thông minh và đa dạng văn phong tối đa. Hãy thử nhập một câu hỏi nhé!`
+        }
+      ]);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleSendMessage = async (textToSend) => {
     const query = typeof textToSend === 'string' ? textToSend.trim() : inputPrompt.trim();
@@ -93,10 +227,17 @@ export default function AIStudioPage() {
         role: m.role,
         content: m.text
       }));
-      const res = await aiApi.chat(query, historyPayload, selectedTone);
+      const res = await aiApi.chat(query, historyPayload, selectedTone, aiConfig);
 
       if (res && res.reply) {
-        setMessages((prev) => [...prev, { role: 'assistant', text: res.reply }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: res.reply,
+            agent: res.agent
+          }
+        ]);
       } else {
         setMessages((prev) => [
           ...prev,
@@ -108,7 +249,7 @@ export default function AIStudioPage() {
         ...prev,
         {
           role: 'assistant',
-          text: `⚠️ Lỗi kết nối AI: ${err.response?.data?.message || err.message}. Vui lòng thử lại!`
+          text: `⚠️ Lỗi kết nối AI: ${err.response?.data?.message || err.message}. Vui lòng kiểm tra lại API Key hoặc cấu hình Agent!`
         }
       ]);
     } finally {
@@ -123,7 +264,6 @@ export default function AIStudioPage() {
   };
 
   const handleUseInCompose = (text) => {
-    // Chuyển hướng sang trang soạn bài kèm nội dung được tạo bởi AI
     sessionStorage.setItem('pageflow_draft_ai_content', text);
     router.push('/post-planner/compose?fromAI=1');
   };
@@ -139,16 +279,75 @@ export default function AIStudioPage() {
     }
   };
 
+  const isAgentConnected = Boolean(aiConfig.apiKey && aiConfig.apiKey.trim().length > 10);
+  const currentProviderObj = PROVIDERS.find((p) => p.id === aiConfig.provider);
+
   return (
-    <MainLayout title="AI Marketing Studio">
+    <MainLayout title="AI Marketing Studio & Chatbot Agent">
       <div className="ai-studio-container" style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20, minHeight: 'calc(100vh - 120px)' }}>
         {/* CỘT TRÁI: TEMPLATES & TONE SELECTOR */}
         <aside className="panel" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="panel-heading" style={{ paddingBottom: 10, borderBottom: '1px solid #EBECF0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Sparkles size={18} color="#FF6B00" />
-              <h2 style={{ fontSize: 16, margin: 0 }}>Công cụ AI</h2>
+          {/* Card trạng thái Agent */}
+          <div style={{
+            padding: 12,
+            borderRadius: 10,
+            background: isAgentConnected ? '#ecfdf5' : '#fffbeb',
+            border: `1px solid ${isAgentConnected ? '#a7f3d0' : '#fde68a'}`
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: isAgentConnected ? '#065f46' : '#92400e' }}>
+                {isAgentConnected ? '🟢 ĐÃ NỐI AGENT' : '🟡 CHẾ ĐỘ DỰ PHÒNG'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowConfigModal(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isAgentConnected ? '#059669' : '#d97706',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  padding: 0
+                }}
+              >
+                <Settings size={12} />
+                <span>Cấu hình</span>
+              </button>
             </div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+              {isAgentConnected ? `${currentProviderObj?.name} (${aiConfig.model})` : 'Smart Engine v3.0'}
+            </div>
+            <p style={{ fontSize: 11, color: '#64748b', margin: '4px 0 8px', lineHeight: 1.3 }}>
+              {isAgentConnected
+                ? 'Đang gọi trực tiếp model LLM với hội thoại thông minh đa ngữ cảnh.'
+                : 'Chưa nối API Key riêng. Bạn có thể bấm "Nối Agent" để kết nối Gemini/ChatGPT.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowConfigModal(true)}
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: isAgentConnected ? '#059669' : '#FF6B00',
+                color: '#ffffff',
+                border: 'none',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5
+              }}
+            >
+              <Cpu size={13} />
+              <span>{isAgentConnected ? 'Thay đổi AI Agent' : '🔌 Nối AI Agent ngay'}</span>
+            </button>
           </div>
 
           {/* Tone Selector */}
@@ -184,7 +383,7 @@ export default function AIStudioPage() {
           {/* Quick Prompts */}
           <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 8 }}>
-              Mẫu câu lệnh thịnh hành
+              Gợi ý câu lệnh mẫu
             </label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {QUICK_PROMPTS.map((item, idx) => {
@@ -226,10 +425,6 @@ export default function AIStudioPage() {
               })}
             </div>
           </div>
-
-          <div style={{ marginTop: 'auto', background: 'rgba(255, 107, 0, 0.05)', border: '1px dashed rgba(255, 107, 0, 0.3)', borderRadius: 10, padding: 12, fontSize: 11, color: '#974F00' }}>
-            💡 <strong>Mẹo:</strong> Sau khi AI tạo bài viết ưng ý, bấm nút <strong>"Đưa vào bài viết mới"</strong> để tự động chuyển sang trang lên lịch đăng ngay!
-          </div>
         </aside>
 
         {/* CỘT PHẢI: KHUNG TRÒ CHUYỆN CHÍNH */}
@@ -239,7 +434,7 @@ export default function AIStudioPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '16px 20px',
+            padding: '14px 20px',
             borderBottom: '1px solid #EBECF0',
             background: '#ffffff'
           }}>
@@ -257,20 +452,35 @@ export default function AIStudioPage() {
                 <Bot size={20} />
               </div>
               <div>
-                <strong style={{ fontSize: 15, color: '#0F172A', display: 'block' }}>PageFlow AI Content Engine</strong>
-                <span style={{ fontSize: 11, color: '#10B981', fontWeight: 700 }}>● Sẵn sàng tạo nội dung viral</span>
+                <strong style={{ fontSize: 15, color: '#0F172A', display: 'block' }}>
+                  {isAgentConnected ? `Agent: ${currentProviderObj?.name}` : 'AI Marketing Assistant'}
+                </strong>
+                <span style={{ fontSize: 11, color: isAgentConnected ? '#059669' : '#10B981', fontWeight: 700 }}>
+                  ● {isAgentConnected ? `Đang kết nối: ${aiConfig.model}` : 'Sẵn sàng sáng tạo nội dung đa ngành'}
+                </span>
               </div>
             </div>
 
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={handleResetChat}
-              style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              <RefreshCw size={13} />
-              <span>Cuộc trò chuyện mới</span>
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setShowConfigModal(true)}
+                style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, borderColor: '#FF6B00', color: '#FF6B00' }}
+              >
+                <Cpu size={13} />
+                <span>{isAgentConnected ? 'Đổi Agent' : 'Nối Agent'}</span>
+              </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={handleResetChat}
+                style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <RefreshCw size={13} />
+                <span>Làm mới</span>
+              </button>
+            </div>
           </div>
 
           {/* Messages Scroll Area */}
@@ -304,7 +514,7 @@ export default function AIStudioPage() {
                     color: '#64748B',
                     fontWeight: 700
                   }}>
-                    {isUser ? 'Bạn' : 'PageFlow AI'}
+                    {isUser ? 'Bạn' : msg.agent ? `🤖 ${msg.agent}` : 'Trợ lý AI'}
                   </div>
 
                   <div style={{
@@ -387,7 +597,7 @@ export default function AIStudioPage() {
                 }}>
                   <Bot size={15} />
                 </div>
-                <span>PageFlow AI đang suy nghĩ và sáng tạo nội dung...</span>
+                <span>{isAgentConnected ? `Agent ${currentProviderObj?.name} đang suy nghĩ...` : 'AI đang xử lý yêu cầu...'}</span>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -414,7 +624,7 @@ export default function AIStudioPage() {
                   handleSendMessage();
                 }
               }}
-              placeholder="Nhập yêu cầu sáng tạo nội dung của bạn (Ví dụ: Viết bài khuyến mãi hè 50% sản phẩm thời trang nữ...)"
+              placeholder="Nhập yêu cầu hoặc câu hỏi bất kỳ (Ví dụ: Viết bài bán cơm trưa sườn nướng mật ong hấp dẫn...)"
               rows={2}
               style={{
                 flex: 1,
@@ -451,6 +661,282 @@ export default function AIStudioPage() {
           </form>
         </section>
       </div>
+
+      {/* MODAL CẤU HÌNH & NỐI AI AGENT / LLM */}
+      {showConfigModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          display: 'grid',
+          placeItems: 'center',
+          zIndex: 10000,
+          padding: 16
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 16,
+            width: '100%',
+            maxWidth: 580,
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            padding: 24,
+            boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
+            position: 'relative'
+          }}>
+            {/* Header Modal */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: 'linear-gradient(135deg, #FF8B00 0%, #FF2E74 100%)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: '#fff'
+                }}>
+                  <Cpu size={20} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: '#0F172A' }}>
+                    Kết nối AI Agent / Mô hình Ngôn ngữ
+                  </h3>
+                  <span style={{ fontSize: 12, color: '#64748B' }}>
+                    Nối trực tiếp Gemini, OpenAI, DeepSeek hoặc Agent riêng
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConfigModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveConfig} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Chọn Nhà cung cấp (Provider) */}
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#334155', marginBottom: 8 }}>
+                  1. Chọn AI Provider / Loại Agent
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {PROVIDERS.map((p) => {
+                    const isSelected = aiConfig.provider === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => handleProviderChange(p.id)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          border: `2px solid ${isSelected ? '#FF6B00' : '#E2E8F0'}`,
+                          background: isSelected ? 'rgba(255, 107, 0, 0.05)' : '#ffffff',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 700, fontSize: 13, color: isSelected ? '#FF6B00' : '#0F172A' }}>
+                            {p.name}
+                          </span>
+                          {isSelected && <Check size={14} color="#FF6B00" />}
+                        </div>
+                        <span style={{ fontSize: 11, color: '#64748B', display: 'block', marginTop: 2 }}>
+                          {p.badge}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Nhập API Key */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>
+                    2. API Key ({currentProviderObj?.name})
+                  </label>
+                  {currentProviderObj?.keyUrl && (
+                    <a
+                      href={currentProviderObj.keyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: 11, color: '#FF6B00', fontWeight: 700, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <span>Lấy API Key {currentProviderObj.name}</span>
+                      <ExternalLink size={11} />
+                    </a>
+                  )}
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    placeholder={currentProviderObj?.id === 'gemini' ? 'AIzaSy...' : 'sk-...'}
+                    value={aiConfig.apiKey}
+                    onChange={(e) => {
+                      setAiConfig((prev) => ({ ...prev, apiKey: e.target.value }));
+                      setTestResult(null);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 40px 10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid #CBD5E1',
+                      fontSize: 13,
+                      boxSizing: 'border-box',
+                      fontFamily: showApiKey ? 'inherit' : 'monospace'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    style={{
+                      position: 'absolute',
+                      right: 12,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: '#64748B'
+                    }}
+                  >
+                    {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <small style={{ color: '#64748B', fontSize: 11, marginTop: 4, display: 'block' }}>
+                  {currentProviderObj?.keyHelp}
+                </small>
+              </div>
+
+              {/* Tên Model */}
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
+                  3. Tên Model
+                </label>
+                <input
+                  type="text"
+                  value={aiConfig.model}
+                  onChange={(e) => setAiConfig((prev) => ({ ...prev, model: e.target.value }))}
+                  placeholder="Ví dụ: gemini-1.5-flash, gpt-4o-mini, deepseek-chat..."
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: '1px solid #CBD5E1',
+                    fontSize: 13,
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Base URL (chỉ hiện khi custom hoặc deepseek/groq) */}
+              {(aiConfig.provider === 'custom' || aiConfig.provider === 'deepseek' || aiConfig.provider === 'groq') && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#334155', marginBottom: 6 }}>
+                    Custom Base URL / Endpoint
+                  </label>
+                  <input
+                    type="text"
+                    value={aiConfig.baseUrl}
+                    onChange={(e) => setAiConfig((prev) => ({ ...prev, baseUrl: e.target.value }))}
+                    placeholder="https://api.openai.com/v1 hoặc http://localhost:11434/v1"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid #CBD5E1',
+                      fontSize: 13,
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Kết quả kiểm tra kết nối */}
+              {testResult && (
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  fontSize: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: testResult.success ? '#ECFDF5' : '#FEF2F2',
+                  border: `1px solid ${testResult.success ? '#A7F3D0' : '#FECACA'}`,
+                  color: testResult.success ? '#065F46' : '#991B1B'
+                }}>
+                  {testResult.success ? <CheckCircle2 size={16} color="#059669" /> : <AlertCircle size={16} color="#DC2626" />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+
+              {/* Nút hành động */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={testingConnection}
+                  style={{
+                    padding: '9px 14px',
+                    borderRadius: 8,
+                    background: '#F1F5F9',
+                    border: '1px solid #CBD5E1',
+                    color: '#334155',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: testingConnection ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <Zap size={14} color="#FF6B00" />
+                  <span>{testingConnection ? 'Đang kiểm tra...' : 'Kiểm tra kết nối'}</span>
+                </button>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfigModal(false)}
+                    style={{
+                      padding: '9px 16px',
+                      borderRadius: 8,
+                      background: '#fff',
+                      border: '1px solid #CBD5E1',
+                      color: '#475569',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      padding: '9px 20px',
+                      borderRadius: 8,
+                      background: 'linear-gradient(115deg, #FF8B00 0%, #FF5230 100%)',
+                      border: 'none',
+                      color: '#ffffff',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(255, 107, 0, 0.3)'
+                    }}
+                  >
+                    Lưu & Kích hoạt Agent
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 }

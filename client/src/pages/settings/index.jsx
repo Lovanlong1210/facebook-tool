@@ -604,6 +604,34 @@ export default function SettingsPage() {
                       />
                       <span>Gợi ý sẵn 2 comment mồi (seeding) tự động kích thích tương tác cho mỗi bài</span>
                     </label>
+
+                    <div style={{ padding: 14, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0', marginTop: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                        <div>
+                          <strong style={{ fontSize: 13, color: '#0f172a' }}>🔌 Kết nối AI Agent / LLM Chatbot</strong>
+                          <p style={{ fontSize: 12, color: '#64748b', margin: '4px 0 0' }}>
+                            Nối trực tiếp Google Gemini (miễn phí), OpenAI, DeepSeek hoặc Agent Dify/Webhook để chatbox trả lời linh hoạt đa văn phong.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => router.push('/ai-studio')}
+                          style={{
+                            padding: '8px 14px',
+                            borderRadius: 8,
+                            background: 'linear-gradient(115deg, #FF8B00 0%, #FF5230 100%)',
+                            color: '#fff',
+                            border: 'none',
+                            fontWeight: 700,
+                            fontSize: 12,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          Mở AI Studio để nối Agent ➔
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

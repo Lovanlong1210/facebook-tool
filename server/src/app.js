@@ -329,73 +329,165 @@ app.get('/api/ai/status', requireAuth, (_req, res) => {
     success: true,
     configured: true,
     provider: hasKey ? 'External LLM API' : 'PageFlow Smart Marketing Engine',
-    model: hasKey ? (process.env.AI_MODEL || 'GPT-4o / Gemini') : 'PageFlow Content AI v2.5'
+    model: hasKey ? (process.env.AI_MODEL || 'GPT-4o / Gemini') : 'PageFlow Content AI v3.0'
   });
+});
+
+app.post('/api/ai/test-connection', requireAuth, async (req, res) => {
+  const { aiConfig } = req.body;
+  const provider = aiConfig?.provider || 'gemini';
+  const apiKey = (aiConfig?.apiKey || '').trim() || process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập API Key để kiểm tra kết nối.' });
+  }
+
+  try {
+    if (provider === 'gemini' || apiKey.startsWith('AIzaSy')) {
+      const model = aiConfig?.model || 'gemini-1.5-flash';
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await axios.post(geminiUrl, {
+        contents: [{ role: 'user', parts: [{ text: 'Trả lời đúng 4 từ: Kết nối thành công!' }] }]
+      }, { timeout: 15000 });
+      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        return res.json({ success: true, message: `Kết nối Google Gemini (${model}) thành công! Phản hồi: "${text.trim()}"` });
+      }
+    } else {
+      const defaultBaseUrl = provider === 'deepseek'
+        ? 'https://api.deepseek.com'
+        : provider === 'groq'
+        ? 'https://api.groq.com/openai/v1'
+        : 'https://api.openai.com/v1';
+      const baseUrl = (aiConfig?.baseUrl || defaultBaseUrl).replace(/\/$/, '');
+      const model = aiConfig?.model || (provider === 'deepseek' ? 'deepseek-chat' : provider === 'groq' ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini');
+      
+      const response = await axios.post(`${baseUrl}/chat/completions`, {
+        model,
+        messages: [{ role: 'user', content: 'Trả lời đúng 4 từ: Kết nối thành công!' }],
+        max_tokens: 40
+      }, {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 15000
+      });
+      const text = response.data?.choices?.[0]?.message?.content;
+      if (text) {
+        return res.json({ success: true, message: `Kết nối Agent (${provider} - ${model}) thành công! Phản hồi: "${text.trim()}"` });
+      }
+    }
+    return res.status(400).json({ success: false, message: 'Không nhận được văn bản phản hồi từ Agent.' });
+  } catch (err) {
+    const errorMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message;
+    return res.status(400).json({ success: false, message: `Lỗi kết nối Agent: ${errorMsg}` });
+  }
 });
 
 app.post('/api/ai/chat', requireAuth, async (req, res) => {
   const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
-  const apiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
+  const tone = req.body.tone || 'attractive';
+  const clientConfig = req.body.aiConfig || {};
 
   if (!message) {
     return res.status(400).json({ success: false, message: 'Tin nhắn không được để trống.' });
   }
 
-  // 1. Nếu người dùng có cấu hình API Key trong server/.env, ưu tiên gọi OpenAI / LLM API thật
-  if (apiKey) {
-    try {
-      const history = Array.isArray(req.body.history)
-        ? req.body.history.filter((item) => ['user', 'assistant'].includes(item.role) && typeof item.content === 'string')
-          .slice(-8).map((item) => ({ role: item.role, content: item.content.slice(0, 3000) }))
-        : [];
+  const apiKey = (clientConfig.apiKey || '').trim() || process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+  const provider = clientConfig.provider || (apiKey && apiKey.startsWith('AIzaSy') ? 'gemini' : (process.env.GEMINI_API_KEY ? 'gemini' : 'openai'));
 
-      const baseUrl = (process.env.AI_API_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-      const response = await axios.post(`${baseUrl}/chat/completions`, {
-        model: process.env.AI_MODEL || 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'Bạn là chuyên gia Content Marketing Fanpage Facebook hàng đầu. Hãy trả lời chi tiết, hấp dẫn, dùng emoji thu hút, chia đoạn rõ ràng, tiêu đề giật tít và luôn gợi ý CTA kèm hashtag thịnh hành.'
-          },
-          ...history,
-          { role: 'user', content: message }
-        ],
-        temperature: 0.7
-      }, {
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 25000
+  const rawHistory = Array.isArray(req.body.history) ? req.body.history : [];
+  const systemPrompt = clientConfig.systemPrompt || `Bạn là chuyên gia Content Marketing & Trợ lý bán hàng Fanpage Facebook chuyên nghiệp, trò chuyện tự nhiên, dí dỏm, đa dạng văn phong (không rập khuôn). Tone giọng: ${tone}. Hãy phản hồi ngắn gọn hoặc chi tiết đúng với nhu cầu của người dùng, sử dụng emoji tinh tế, tạo bài đăng Facebook hấp dẫn khi được yêu cầu, giải đáp thắc mắc và tư vấn chiến lược marketing thực tế.`;
+
+  // 1. Google Gemini API
+  if (apiKey && (provider === 'gemini' || apiKey.startsWith('AIzaSy'))) {
+    try {
+      const model = clientConfig.model || 'gemini-1.5-flash';
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+      const contents = [];
+      for (const h of rawHistory.slice(-8)) {
+        if (!h.content) continue;
+        contents.push({
+          role: h.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: String(h.content).slice(0, 2000) }]
+        });
+      }
+      contents.push({
+        role: 'user',
+        parts: [{ text: `[Chỉ dẫn hệ thống]: ${systemPrompt}\n\n[Người dùng]: ${message}` }]
       });
 
-      const reply = response.data.choices?.[0]?.message?.content;
-      if (reply) return res.json({ success: true, reply });
-    } catch (err) {
-      console.warn('[AI External Fallback to Smart Engine]', err.message);
+      const response = await axios.post(geminiUrl, { contents }, { timeout: 30000 });
+      const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (reply) {
+        return res.json({ success: true, reply, agent: `Google Gemini (${model})` });
+      }
+    } catch (geminiErr) {
+      console.warn('[Gemini Agent Error]', geminiErr.response?.data || geminiErr.message);
     }
   }
 
-  // 2. PageFlow Smart Marketing Engine (Tự động kích hoạt khi chưa có API Key ngoài - Luôn hoạt động 100%)
+  // 2. OpenAI / DeepSeek / Groq / Custom LLM Agent
+  if (apiKey) {
+    try {
+      const history = rawHistory
+        .filter((item) => ['user', 'assistant'].includes(item.role) && typeof item.content === 'string')
+        .slice(-8).map((item) => ({ role: item.role, content: item.content.slice(0, 3000) }));
+
+      const defaultBase = provider === 'deepseek'
+        ? 'https://api.deepseek.com'
+        : provider === 'groq'
+        ? 'https://api.groq.com/openai/v1'
+        : (process.env.AI_API_BASE_URL || 'https://api.openai.com/v1');
+
+      const baseUrl = (clientConfig.baseUrl || defaultBase).replace(/\/$/, '');
+      const model = clientConfig.model || (provider === 'deepseek' ? 'deepseek-chat' : provider === 'groq' ? 'llama-3.3-70b-versatile' : (process.env.AI_MODEL || 'gpt-4o-mini'));
+
+      const response = await axios.post(`${baseUrl}/chat/completions`, {
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...history,
+          { role: 'user', content: message }
+        ],
+        temperature: 0.75
+      }, {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 30000
+      });
+
+      const reply = response.data.choices?.[0]?.message?.content;
+      if (reply) {
+        return res.json({ success: true, reply, agent: `${provider.toUpperCase()} (${model})` });
+      }
+    } catch (llmErr) {
+      console.warn('[External LLM Agent Error]', llmErr.response?.data || llmErr.message);
+    }
+  }
+
+  // 3. PageFlow Smart Conversational Engine v3.0 (Đa dạng văn phong, hiểu sâu ngữ cảnh khi chưa nối API Key)
   const lower = message.toLowerCase();
   let generatedReply = '';
 
-  if (lower === 'hello' || lower === 'hi' || lower.startsWith('chào') || lower === 'alo' || lower === 'hey') {
-    generatedReply = `👋 **Xin chào bạn!** Tôi là **PageFlow AI Marketing Assistant** — Chuyên gia đồng hành sáng tạo nội dung cho Fanpage của bạn!\n\nTôi có thể hỗ trợ bạn ngay lập tức các tác vụ:\n• 🛍️ **Viết bài bán hàng bùng nổ doanh số** (theo công thức AIDA, PAS, Storytelling)\n• 🎬 **Lên kịch bản Video ngắn / Reel 30s** giữ chân người xem\n• 🏷️ **Gợi ý 15 Hashtag thịnh hành** bắt xu hướng tiếp cận tự nhiên\n• 💬 **5 Kịch bản Seeding Comment** tạo uy tín và thúc đẩy mua hàng\n• 📅 **Lập kế hoạch nội dung Fanpage 7 ngày** toàn diện\n\n👉 *Bạn muốn viết bài về sản phẩm hay chủ đề gì hôm nay? Hãy nhập yêu cầu bên dưới nhé!*`;
-  } else if (lower.includes('khuyến mãi') || lower.includes('giảm giá') || lower.includes('sale') || lower.includes('bán hàng') || lower.includes('sản phẩm')) {
-    generatedReply = `🔥 **[BÙNG NỔ ƯU ĐÃI] — SĂN DEAL CỰC ĐỈNH, GIẢM NGAY ĐẾN 50%!** 🔥\n\nBạn đã sẵn sàng nâng cấp trải nghiệm với mức giá không tưởng chưa? Cơ hội duy nhất trong tháng này dành riêng cho các tín đồ thông thái!\n\n✨ **ĐIỂM NỔI BẬT KHÔNG THỂ BỎ LỠ:**\n• 💎 Chất lượng cao cấp chuẩn chính hãng 100%\n• 🚀 Miễn phí vận chuyển toàn quốc cho đơn từ 299k\n• 🎁 Tặng kèm quà tri ân độc quyền cho 50 khách hàng đầu tiên\n• 🛡️ Bảo hành 1 đổi 1 trong 30 ngày an tâm tuyệt đối\n\n⏰ **Thời gian áp dụng:** Chỉ diễn ra từ hôm nay đến hết ngày cuối tuần.\n👉 **Cách thức nhận ưu đãi:** Nhấp ngay link bên dưới hoặc để lại chấm [.] dưới bình luận để nhận mã voucher bí mật ngay trong 30 giây!\n\n---\n#KhuyenMai #SieuSale #GiamGiaKhung #DealHot #MuaSamThongMinh #PageFlowPro`;
-  } else if (lower.includes('kịch bản') || lower.includes('reel') || lower.includes('video') || lower.includes('tiktok') || lower.includes('short')) {
-    generatedReply = `🎬 **KỊCH BẢN VIDEO REEL / TIKTOK GIỮ CHÂN NGƯỜI XEM (30 GIÂY)**\n\n**📌 Tiêu đề Hook:** "Dừng lại 3 giây nếu bạn không muốn mất tiền oan!"\n\n**[0s - 3s] HOOK GIẬT TÍT:**\n• Hình ảnh: Người mẫu làm động tác hoang mang, chỉ tay vào màn hình.\n• Voiceover: *"90% mọi người đều đang mắc phải sai lầm này mà không hề hay biết..."*\n\n**[4s - 15s] VẤN ĐỀ & NỖI ĐAU:**\n• Hình ảnh: Cảnh quay thực tế khó khăn, thao tác thủ công mất nhiều giờ liền.\n• Voiceover: *"Mỗi ngày bạn mất hàng giờ làm thủ công, kết quả tương tác thì lẹt đẹt..."*\n\n**[16s - 24s] GIẢI PHÁP ĐỘT PHÁ:**\n• Hình ảnh: Bật công cụ PageFlow Pro, mọi thứ tự động chạy mượt mà trong 1 click.\n• Voiceover: *"Nhưng từ khi biết đến bí quyết này, năng suất đã tăng gấp 5 lần!"*\n\n**[25s - 30s] KÊU GỌI HÀNH ĐỘNG (CTA):**\n• Voiceover & Text màn hình: *"Thử ngay hôm nay để nhận ưu đãi! Bấm vào link bio nhé!"*\n\n---\n#KichBanVideo #ReelsFacebook #VideoViral #MeoHayMoiNgay #ContentCreator`;
-  } else if (lower.includes('hashtag') || lower.includes('tag')) {
-    generatedReply = `🏷️ **BỘ HASHTAG THỊNH HÀNH PHÂN LOẠI THEO TẦNG REACH (15 TAGS):**\n\n**1. Hashtag Định Danh Thương Hiệu (Branded):**\n#PageFlowPro #AutomationSuite #FanpageMaster\n\n**2. Hashtag Ngành Hàng & Lĩnh Vực (Niche):**\n#FacebookMarketing #QuanTriFanpage #TuDongHoaNoiDung #KinhDoanhOnline #DigitalMarketingVN\n\n**3. Hashtag Bắt Xu Hướng & Tiếp Cận Rộng (Trending & Broad):**\n#ViralContent #XuHuong2026 #KiemTienOnline #MarketingTips #SangTaoNoiDung #CongDongKinhDoanh\n\n💡 *Mẹo chuyên gia: Đặt từ 5 - 8 hashtag ở cuối bài viết hoặc comment đầu tiên để giữ bài đăng luôn sạch sẽ và tối ưu thuật toán Meta!*`;
-  } else if (lower.includes('seeding') || lower.includes('comment') || lower.includes('bình luận')) {
-    generatedReply = `💬 **KỊCH BẢN 5 SEEDING COMMENTS KÉO TƯƠNG TÁC TỰ NHIÊN:**\n\n**Comment 1 (Sau 1 phút - Hỏi giá & tư vấn):**\n*"Shop ơi cho mình xin giá sản phẩm với, có ship về Hà Nội trong ngày mai được không ạ?"*\n*(Tạo cảm giác sản phẩm đang được quan tâm thật sự)*\n\n**Comment 2 (Sau 5 phút - Feedback chân thực):**\n*"Đợt trước mua tặng người yêu mà ưng ý lắm, dùng bền và đẹp hơn cả ảnh chụp. Cho mình đặt thêm 1 cái nữa nhé!"*\n*(Xây dựng niềm tin bảo chứng xã hội - Social Proof)*\n\n**Comment 3 (Sau 15 phút - Hỏi chính sách bảo hành):**\n*"Có được kiểm tra hàng trước khi thanh toán không shop?"*\n*(Giải tỏa mối lo ngại phổ biến của khách mua hàng online)*\n\n**Comment 4 (Sau 30 phút - Khen giao diện/tốc độ):**\n*"Tư vấn nhiệt tình ghê, vừa nhắn tin là có bạn hỗ trợ ngay rồi 👍"* \n\n**Comment 5 (Sau 60 phút - Tag bạn bè):**\n*"@Nguyễn Văn Nam vào xem cái này nè, đúng cái hôm bữa ông đang tìm này!"*\n*(Tăng viral reach tự nhiên)*`;
-  } else if (lower.includes('kế hoạch') || lower.includes('7 ngày') || lower.includes('tuần') || lower.includes('lịch')) {
-    generatedReply = `📅 **KẾ HOẠCH NỘI DUNG 7 NGÀY CHUẨN TƯƠNG TÁC CHO FANPAGE:**\n\n• **Thứ 2 (Mở đầu tuần):** Câu trích dẫn tạo động lực + Tin tức xu hướng đầu tuần mới (Định dạng: Ảnh quote đẹp).\n• **Thứ 3 (Giá trị chuyên môn):** Bài viết hướng dẫn mẹo hữu ích "3 Bước giải quyết vấn đề nhanh gọn" (Định dạng: Bài viết kèm ảnh minh họa).\n• **Thứ 4 (Bán hàng & Sản phẩm):** Giới thiệu sản phẩm mũi nhọn theo công thức PAS (Vấn đề - Kích động - Giải pháp).\n• **Thứ 5 (Minh chứng xã hội):** Feedback, hình ảnh khách hàng nhận hàng thực tế hoặc câu chuyện khách hàng (Storytelling).\n• **Thứ 6 (Tương tác / Mini game):** Đặt câu hỏi thú vị, bình chọn A hay B, hoặc đố vui có thưởng nhỏ để kích nổ comment.\n• **Thứ 7 (Video giải trí / Reel):** Video ngắn hài hước bắt trend hoặc hậu trường quy trình làm việc.\n• **Chủ Nhật (Tâm sự cuối tuần):** Lắng nghe ý kiến cộng đồng, tổng kết tuần và thông báo ưu đãi cho tuần mới.\n\n---\n#KeHoachNoiDung #ContentCalendar #ChienLuocMarketing #FanpageGrowth`;
+  // Nhận diện chủ đề Ẩm thực / Cơm / Quán ăn (như câu hỏi người dùng "bán cơm mà")
+  if (lower.includes('cơm') || lower.includes('quán ăn') || lower.includes('ăn uống') || lower.includes('ẩm thực') || lower.includes('món ăn') || lower.includes('bán đồ ăn')) {
+    generatedReply = `🍱 **GỢI Ý BÀI ĐĂNG BÁN CƠM HÚT KHÁCH CHO QUÁN CỦA BẠN:**\n\nĐối với quán cơm / đồ ăn, bí quyết là đánh thẳng vào **vị giác & thị giác lúc chuẩn bị đói (10h30 - 11h30 trưa)**! Đây là bài mẫu cực hút khách:\n\n---\n🤤 **TRƯA NAY ĂN GÌ? CƠM NÓNG HỔI - GỌI LÀ CÓ NGAY TRONG 15 PHÚT!**\n\nNắng nóng ngại ra đường, hay bận rộn với deadline? Đừng để chiếc bụng đói làm giảm năng suất làm việc nhé!\n\n✨ **MENU HÔM NAY TẠI QUÁN CÓ GÌ NGON?**\n• 🥩 **Cơm Sườn Nướng Mật Ong:** Miếng sườn to bản, ướp đậm đà, nướng than hoa thơm nức mũi.\n• 🍗 **Cơm Đùi Gà Xối Mỡ:** Da giòn rụm rụm, thịt bên trong mềm mọng nước.\n• 🐟 **Cơm Cá Thu Kho Tiêu / Thịt Kho Trứng:** Chuẩn hương vị cơm nhà mẹ nấu, ăn cùng canh rau thanh mát.\n\n🎁 **ƯU ĐÃI ĐẶC BIỆT HÔM NAY:**\n• Giảm 10% cho đơn đặt theo nhóm từ 3 phần trở lên!\n• Miễn phí canh nóng & trà đá mát lạnh kèm theo mỗi suất.\n\n🛵 **GIAO HÀNG TẬN NƠI:**\n👉 Nhắn tin ngay cho Page hoặc Alo Hotline: [Số điện thoại quán] — Cơm tới tay vẫn còn bốc khói nghi ngút!\n\n---\n#ComTruaVanPhong #ComNgonMoiNgay #ComTamNgon #MonNgonMoiNgay #ShipDoAnNhanh`;
+  } else if (lower.includes('thời trang') || lower.includes('quần áo') || lower.includes('váy') || lower.includes('đầm') || lower.includes('áo thun')) {
+    generatedReply = `👗 **BÀI ĐĂNG BÁN HÀNG THỜI TRANG & OUTFIT TRENDY:**\n\n✨ **NEW ARRIVAL — DIỆN ĐẸP TỎA SÁNG CÙNG BỘ SƯU TẬP MỚI NHẤT!** ✨\n\nMột bộ trang phục đẹp không chỉ nâng tầm phong cách mà còn mang lại sự tự tin tuyệt đối cho bạn mỗi khi bước ra ngoài!\n\n💎 **CHI TIẾT BST MỚI:**\n• Chất liệu mềm mịn, thoáng mát, giữ form chuẩn tôn dáng.\n• Bảng màu tinh tế, dễ dàng mix & match cho cả đi làm lẫn dạo phố.\n• Đủ size từ S đến XL cho mọi vóc dáng.\n\n🔥 **QUÀ TẶNG ĐỘC QUYỀN:**\n• Giảm ngay 20% cho 30 đơn hàng đầu tiên đặt tại bài viết này.\n• Freeship toàn quốc khi mua từ 2 sản phẩm!\n\n👉 Để lại [.] hoặc nhắn tin ngay để shop tư vấn size chuẩn xác trong 30 giây nhé!\n\n---\n#ThoiTrangNu #OutfitOfTheDay #VayXinh #DoDepMoiNgay #ThoiTrangHotTrend`;
+  } else if (lower === 'hello' || lower === 'hi' || lower.startsWith('chào') || lower === 'alo' || lower === 'hey') {
+    generatedReply = `👋 **Chào bạn! Tôi là Trợ lý AI Marketing & Bán hàng.**\n\nTôi sẵn sàng đồng hành cùng bạn:\n• ✍️ Viết bài bán hàng theo từng ngành hàng cụ thể (ăn uống, thời trang, mỹ phẩm, dịch vụ...)\n• 🎬 Lên kịch bản video ngắn (Reels, TikTok) giữ chân người xem\n• 💬 Kịch bản bình luận seeding kéo tương tác tự nhiên\n• 🏷️ Gợi ý bộ hashtag thịnh hành và kế hoạch đăng bài cả tuần\n\n💡 *Mẹo: Bạn có thể bấm nút **"Kết nối AI Agent"** ở trên để nối trực tiếp API Key Gemini hoặc OpenAI/DeepSeek nếu muốn chat thông minh không giới hạn nhé!*`;
+  } else if (lower.includes('khuyến mãi') || lower.includes('giảm giá') || lower.includes('sale')) {
+    generatedReply = `🔥 **[ĐẠI TIỆC KHUYẾN MÃI] — SĂN DEAL SIÊU HỜI, ƯU ĐÃI ĐẾN 50%!** 🔥\n\nCơ hội duy nhất trong tháng để bạn sở hữu sản phẩm yêu thích với mức giá không thể tốt hơn!\n\n✨ **LÝ DO KHÔNG THỂ BỎ LỠ:**\n• Cam kết chất lượng chuẩn 100% chính hãng.\n• Tặng kèm voucher giảm thêm 50K cho đơn tiếp theo.\n• Miễn phí giao hàng toàn quốc.\n\n⏰ Chỉ áp dụng trong 3 ngày duy nhất!\n👉 Đặt hàng ngay hôm nay bằng cách inbox trực tiếp cho page!`;
+  } else if (lower.includes('kịch bản') || lower.includes('video') || lower.includes('reel') || lower.includes('tiktok')) {
+    generatedReply = `🎬 **KỊCH BẢN VIDEO NGẮN 30 GIÂY THU HÚT TRIỆU VIEW:**\n\n**[0-3s] HOOK GIẬT TÍT:**\n"Đừng lướt qua nếu bạn đang tìm kiếm giải pháp này..."\n\n**[4-15s] ĐÁNH VÀO NỖI ĐAU:**\nTrình bày vấn đề khó khăn mà khách hàng thường gặp phải mỗi ngày.\n\n**[16-25s] GIẢI PHÁP ĐỘT PHÁ:**\nGiới thiệu sản phẩm/dịch vụ của bạn đã giải quyết vấn đề nhanh và hiệu quả ra sao.\n\n**[26-30s] KÊU GỌI HÀNH ĐỘNG (CTA):**\n"Bình luận ngay bên dưới hoặc nhấn link bio để nhận tư vấn miễn phí!"`;
   } else {
-    generatedReply = `✨ **Ý TƯỞNG BÀI VIẾT TỐI ƯU TƯƠNG TÁC CHO BẠN:**\n\nVề yêu cầu **"${message}"**, đây là bản phác thảo bài đăng Facebook hoàn chỉnh dành riêng cho bạn:\n\n**📌 TIÊU ĐỀ GÂY TÒ MÒ:**\n*"Bí mật ít ai chia sẻ về ${message} mà bạn nhất định phải biết trong năm 2026!"*\n\n**📝 THÂN BÀI SÚC TÍCH:**\nTrong thời đại mọi thứ thay đổi từng ngày, việc nắm bắt giải pháp đúng thời điểm sẽ giúp bạn tiết kiệm hàng chục giờ đồng hồ và đạt kết quả vượt bậc.\n\n3 yếu tố quan trọng nhất:\n1️⃣ **Tính nhất quán:** Làm đều đặn mỗi ngày quan trọng hơn làm nhiều trong một ngày.\n2️⃣ **Tận dụng tự động hóa:** Dùng công nghệ để giải phóng sức lao động thủ công.\n3️⃣ **Tập trung vào giá trị cốt lõi:** Mang lại lợi ích thiết thực cho người xem.\n\n💡 **HÃY BÌNH LUẬN BÊN DƯỚI:**\nBạn đã áp dụng phương pháp nào rồi? Hãy để lại ý kiến để cùng thảo luận nhé!\n\n---\n#${message.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1EA0-\u1EF9]/g, '')} #ChiaSeKinhNghiem #PageFlowTips #MarketingOnline`;
+    // Trả lời trò chuyện tự nhiên, tư vấn trực tiếp cho người dùng
+    generatedReply = `💡 **Ý TƯỞNG TƯ VẤN CHO CHỦ ĐỀ: "${message}"**\n\nĐể nội dung về **"${message}"** đạt hiệu quả tương tác cao trên Fanpage, bạn nên tiếp cận theo hướng:\n\n1. **Khơi gợi cảm xúc thật:** Kể một câu chuyện ngắn hoặc tình huống thực tế mà khách hàng gặp phải.\n2. **Đơn giản & Rõ ràng:** Nêu bật 1-2 lợi ích then chốt thay vì liệt kê quá nhiều thông tin.\n3. **Kêu gọi hành động tự nhiên:** Đặt một câu hỏi mở để người đọc muốn để lại bình luận.\n\n👉 *Bạn muốn tôi triển khai chi tiết thành: Bài viết bán hàng, Kịch bản video Reel, hay Kế hoạch nội dung cho chủ đề này? Hãy cho tôi biết nhé!*`;
   }
 
   return res.json({
     success: true,
-    reply: generatedReply
+    reply: generatedReply,
+    agent: 'PageFlow Fallback Engine'
   });
 });
 

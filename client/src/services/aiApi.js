@@ -8,10 +8,19 @@ export const aiApi = {
     return response.data;
   },
 
-  chat: async (message, history = [], tone = 'attractive') => {
+  testConnection: async (aiConfig) => {
+    const response = await axios.post(
+      `${API_BASE_URL}/ai/test-connection`,
+      { aiConfig },
+      { withCredentials: true }
+    );
+    return response.data;
+  },
+
+  chat: async (message, history = [], tone = 'attractive', aiConfig = null) => {
     const response = await axios.post(
       `${API_BASE_URL}/ai/chat`,
-      { message, history, tone },
+      { message, history, tone, aiConfig },
       { withCredentials: true }
     );
     return response.data;
