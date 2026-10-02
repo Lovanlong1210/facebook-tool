@@ -584,21 +584,21 @@ export default function LoginPage() {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          background: #FFF4E5;
-          border: 1px solid #FFE2BA;
+          background: rgba(255, 46, 116, 0.08);
+          border: 1px solid rgba(255, 46, 116, 0.25);
           border-radius: 999px;
           padding: 6px 14px;
           font-size: 12px;
           font-weight: 700;
-          color: #FF6B00;
+          color: #FF2E74;
         }
 
         .live-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background: #36B37E;
-          box-shadow: 0 0 10px #36B37E;
+          background: #10B981;
+          box-shadow: 0 0 10px #10B981;
         }
 
         .showcase-hero h1 {
@@ -607,8 +607,8 @@ export default function LoginPage() {
           line-height: 1.15;
           letter-spacing: -0.02em;
           margin: 0 0 16px;
-          color: #0B1B3D;
-          background: linear-gradient(115deg, #0B1B3D 0%, #FF6B00 100%);
+          color: #0F172A;
+          background: linear-gradient(135deg, #0F172A 0%, #FF2E74 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
         }
@@ -616,7 +616,7 @@ export default function LoginPage() {
         .showcase-hero p {
           font-size: 16px;
           line-height: 1.65;
-          color: #5E6C84;
+          color: #475569;
           margin: 0;
           max-width: 540px;
         }
