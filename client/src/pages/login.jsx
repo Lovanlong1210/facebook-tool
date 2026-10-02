@@ -509,23 +509,23 @@ export default function LoginPage() {
       <style jsx global>{`
         .login-root {
           min-height: 100vh;
-          background: #f8fafc;
-          color: #0f172a;
+          background: #FAFBFC;
+          color: #172B4D;
           position: relative;
           display: flex;
           align-items: center;
           justify-content: center;
           padding: 32px 20px;
           overflow-x: hidden;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
         .ambient-grid {
           position: absolute;
           inset: 0;
           background-image: 
-            linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+            linear-gradient(to right, rgba(9, 30, 66, 0.04) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(9, 30, 66, 0.04) 1px, transparent 1px);
           background-size: 40px 40px;
           pointer-events: none;
         }
@@ -542,7 +542,7 @@ export default function LoginPage() {
           height: 550px;
           top: -120px;
           left: -80px;
-          background: rgba(37, 99, 235, 0.1);
+          background: rgba(255, 139, 0, 0.08);
         }
 
         .ambient-2 {
@@ -550,7 +550,7 @@ export default function LoginPage() {
           height: 600px;
           bottom: -150px;
           right: -100px;
-          background: rgba(14, 165, 233, 0.08);
+          background: rgba(255, 82, 48, 0.06);
         }
 
         .login-container {
@@ -584,31 +584,31 @@ export default function LoginPage() {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          background: #eff6ff;
-          border: 1px solid #bfdbfe;
+          background: #FFF4E5;
+          border: 1px solid #FFE2BA;
           border-radius: 999px;
           padding: 6px 14px;
           font-size: 12px;
-          font-weight: 600;
-          color: #1d4ed8;
+          font-weight: 700;
+          color: #FF6B00;
         }
 
         .live-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background: #10b981;
-          box-shadow: 0 0 10px #10b981;
+          background: #36B37E;
+          box-shadow: 0 0 10px #36B37E;
         }
 
         .showcase-hero h1 {
           font-size: clamp(2.2rem, 3.4vw, 3.2rem);
-          font-weight: 800;
+          font-weight: 900;
           line-height: 1.15;
           letter-spacing: -0.02em;
           margin: 0 0 16px;
-          color: #0f172a;
-          background: linear-gradient(135deg, #0f172a 0%, #1e40af 100%);
+          color: #0B1B3D;
+          background: linear-gradient(115deg, #0B1B3D 0%, #FF6B00 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
         }
@@ -616,17 +616,17 @@ export default function LoginPage() {
         .showcase-hero p {
           font-size: 16px;
           line-height: 1.65;
-          color: #475569;
+          color: #5E6C84;
           margin: 0;
           max-width: 540px;
         }
 
         .preview-card {
           background: #ffffff;
-          border: 1px solid #e2e8f0;
+          border: 1px solid #EBECF0;
           border-radius: 20px;
           padding: 24px;
-          box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+          box-shadow: 0 20px 50px rgba(9, 30, 66, 0.08);
         }
 
         .preview-card-header {
@@ -635,19 +635,20 @@ export default function LoginPage() {
           gap: 14px;
           margin-bottom: 20px;
           padding-bottom: 16px;
-          border-bottom: 1px solid #e2e8f0;
+          border-bottom: 1px solid #EBECF0;
         }
 
         .page-avatar {
-          width: 42px;
-          height: 42px;
-          border-radius: 10px;
-          background: linear-gradient(135deg, #1877f2, #0284c7);
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          background: linear-gradient(115deg, #FF8B00 0%, #FF5230 100%);
           color: #fff;
-          font-weight: 800;
+          font-weight: 900;
           display: grid;
           place-items: center;
           font-size: 16px;
+          box-shadow: 0 4px 12px rgba(255, 107, 0, 0.35);
         }
 
         .page-info {
@@ -657,25 +658,26 @@ export default function LoginPage() {
         .page-info strong {
           display: block;
           font-size: 15px;
-          color: #0f172a;
+          color: #0B1B3D;
+          font-weight: 800;
         }
 
         .page-info span {
           font-size: 12px;
-          color: #059669;
-          font-weight: 600;
+          color: #36B37E;
+          font-weight: 700;
         }
 
         .metric-chip {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          background: #ecfdf5;
-          border: 1px solid #a7f3d0;
-          color: #059669;
+          background: #E3FCEF;
+          border: 1px solid #ABF5D1;
+          color: #006644;
           font-size: 12px;
-          font-weight: 700;
-          padding: 6px 10px;
+          font-weight: 800;
+          padding: 6px 12px;
           border-radius: 8px;
         }
 
@@ -689,8 +691,8 @@ export default function LoginPage() {
           display: flex;
           align-items: center;
           gap: 12px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
+          background: #FAFBFC;
+          border: 1px solid #EBECF0;
           border-radius: 12px;
           padding: 12px;
         }
@@ -698,13 +700,14 @@ export default function LoginPage() {
         .feature-pill strong {
           display: block;
           font-size: 13px;
-          color: #1e293b;
+          color: #172B4D;
+          font-weight: 700;
         }
 
         .feature-pill span {
           display: block;
           font-size: 11px;
-          color: #64748b;
+          color: #6B778C;
           margin-top: 2px;
         }
 
@@ -717,19 +720,20 @@ export default function LoginPage() {
         .stat-item strong {
           display: block;
           font-size: 20px;
-          font-weight: 800;
-          color: #1d4ed8;
+          font-weight: 900;
+          color: #FF6B00;
         }
 
         .stat-item span {
           font-size: 12px;
-          color: #64748b;
+          color: #6B778C;
+          font-weight: 600;
         }
 
         .stat-separator {
           width: 1px;
           height: 30px;
-          background: #e2e8f0;
+          background: #EBECF0;
         }
 
         /* Auth Side */
@@ -741,30 +745,30 @@ export default function LoginPage() {
 
         .auth-card {
           background: #ffffff;
-          border: 1px solid #e2e8f0;
+          border: 1px solid #EBECF0;
           border-radius: 24px;
           padding: 34px 28px;
-          box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.12),
-                      0 0 0 1px rgba(0, 0, 0, 0.02);
+          box-shadow: 0 25px 60px -15px rgba(9, 30, 66, 0.12),
+                      0 0 0 1px rgba(9, 30, 66, 0.04);
         }
 
         .auth-card-top h2 {
           font-size: 22px;
-          font-weight: 800;
+          font-weight: 900;
           margin: 0 0 6px;
-          color: #0f172a;
+          color: #0B1B3D;
         }
 
         .auth-card-top p {
           font-size: 13px;
-          color: #64748b;
+          color: #6B778C;
           margin: 0 0 22px;
         }
 
         .auth-tabs {
           display: flex;
-          background: #f1f5f9;
-          border: 1px solid #e2e8f0;
+          background: #F4F5F7;
+          border: 1px solid #EBECF0;
           border-radius: 12px;
           padding: 4px;
           gap: 4px;
@@ -777,26 +781,26 @@ export default function LoginPage() {
           align-items: center;
           justify-content: center;
           gap: 7px;
-          padding: 9px 8px;
+          padding: 10px 8px;
           border: 0;
           background: transparent;
-          color: #64748b;
+          color: #6B778C;
           border-radius: 8px;
           font-size: 12px;
-          font-weight: 600;
+          font-weight: 700;
           cursor: pointer;
           transition: all 0.2s;
         }
 
         .tab-btn:hover {
-          color: #0f172a;
+          color: #0B1B3D;
         }
 
         .tab-btn.is-active {
-          color: #1d4ed8;
+          color: #FF6B00;
           background: #ffffff;
-          font-weight: 700;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+          font-weight: 800;
+          box-shadow: 0 2px 8px rgba(9, 30, 66, 0.08);
         }
 
         .alert {
@@ -811,15 +815,15 @@ export default function LoginPage() {
         }
 
         .alert-error {
-          background: #fef2f2;
-          border: 1px solid #fecaca;
-          color: #dc2626;
+          background: #FFEBE6;
+          border: 1px solid #FFBDAD;
+          color: #DE350B;
         }
 
         .alert-success {
-          background: #ecfdf5;
-          border: 1px solid #a7f3d0;
-          color: #059669;
+          background: #E3FCEF;
+          border: 1px solid #ABF5D1;
+          color: #006644;
         }
 
         .alert-icon {
@@ -847,16 +851,16 @@ export default function LoginPage() {
 
         .form-item label {
           font-size: 12px;
-          font-weight: 600;
-          color: #334155;
+          font-weight: 700;
+          color: #172B4D;
         }
 
         .text-action-btn {
           background: transparent;
           border: 0;
-          color: #2563eb;
+          color: #FF6B00;
           font-size: 11px;
-          font-weight: 600;
+          font-weight: 700;
           cursor: pointer;
           padding: 0;
         }
@@ -869,9 +873,10 @@ export default function LoginPage() {
           display: inline-flex;
           align-items: center;
           gap: 4px;
-          color: #2563eb;
+          color: #FF6B00;
           font-size: 12px;
           text-decoration: none;
+          font-weight: 600;
         }
 
         .external-link:hover {
@@ -881,10 +886,10 @@ export default function LoginPage() {
         .styled-input, .styled-textarea {
           width: 100%;
           background: #ffffff;
-          border: 1px solid #cbd5e1;
+          border: 1px solid #DFE1E6;
           border-radius: 10px;
           padding: 10px 14px;
-          color: #0f172a;
+          color: #172B4D;
           font-size: 14px;
           outline: none;
           transition: border-color 0.2s, box-shadow 0.2s;
@@ -902,25 +907,25 @@ export default function LoginPage() {
         }
 
         .styled-input:focus, .styled-textarea:focus {
-          border-color: #2563eb;
-          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+          border-color: #FF6B00;
+          box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.18);
         }
 
         .helper-banner {
           display: flex;
           align-items: flex-start;
           gap: 9px;
-          background: #eff6ff;
-          border: 1px dashed #bfdbfe;
+          background: #FFF4E5;
+          border: 1px dashed #FFE2BA;
           border-radius: 10px;
           padding: 10px 12px;
           font-size: 12px;
-          color: #1e40af;
+          color: #974F00;
           line-height: 1.45;
         }
 
         .helper-icon {
-          color: #2563eb;
+          color: #FF6B00;
           flex-shrink: 0;
           margin-top: 1px;
         }
@@ -931,8 +936,8 @@ export default function LoginPage() {
           align-items: center;
           justify-content: center;
           gap: 8px;
-          padding: 13px 18px;
-          border-radius: 12px;
+          padding: 14px 18px;
+          border-radius: 10px;
           font-size: 14px;
           font-weight: 700;
           border: 0;
@@ -941,14 +946,14 @@ export default function LoginPage() {
         }
 
         .glow-cta {
-          background: linear-gradient(135deg, #1877f2 0%, #2563eb 100%);
-          color: #fff;
-          box-shadow: 0 8px 24px -4px rgba(37, 99, 235, 0.4);
+          background: linear-gradient(115deg, #FF8B00 0%, #FF5230 100%);
+          color: #ffffff;
+          box-shadow: 0 8px 24px rgba(255, 107, 0, 0.4);
         }
 
         .glow-cta:hover:not(:disabled) {
-          background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
-          box-shadow: 0 10px 28px -3px rgba(37, 99, 235, 0.5);
+          background: linear-gradient(115deg, #FF7A00 0%, #E04020 100%);
+          box-shadow: 0 10px 28px rgba(255, 107, 0, 0.5);
           transform: translateY(-1px);
         }
 
@@ -970,8 +975,8 @@ export default function LoginPage() {
         }
 
         .meta-status-card {
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
+          background: #FAFBFC;
+          border: 1px solid #EBECF0;
           border-radius: 10px;
           padding: 10px 14px;
         }
@@ -981,7 +986,7 @@ export default function LoginPage() {
           align-items: center;
           justify-content: space-between;
           font-size: 13px;
-          color: #475569;
+          color: #5E6C84;
         }
 
         .badge {
@@ -992,20 +997,20 @@ export default function LoginPage() {
         }
 
         .badge-online {
-          color: #059669;
-          background: #ecfdf5;
-          border: 1px solid #a7f3d0;
+          color: #006644;
+          background: #E3FCEF;
+          border: 1px solid #ABF5D1;
         }
 
         .badge-offline {
-          color: #d97706;
-          background: #fffbeb;
-          border: 1px solid #fde68a;
+          color: #974F00;
+          background: #FFF4E5;
+          border: 1px solid #FFE2BA;
         }
 
         .config-form-section {
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
+          background: #FAFBFC;
+          border: 1px solid #EBECF0;
           border-radius: 14px;
           padding: 16px;
           display: flex;
@@ -1019,32 +1024,32 @@ export default function LoginPage() {
           align-items: center;
           gap: 8px;
           font-size: 13px;
-          font-weight: 700;
-          color: #0f172a;
+          font-weight: 800;
+          color: #0B1B3D;
         }
 
         .config-desc {
           font-size: 11px;
-          color: #64748b;
+          color: #6B778C;
           margin: 0;
           line-height: 1.4;
         }
 
         .save-config-btn {
           width: 100%;
-          padding: 9px;
+          padding: 10px;
           background: #ffffff;
-          border: 1px solid #cbd5e1;
+          border: 1px solid #DFE1E6;
           border-radius: 8px;
-          color: #1e293b;
+          color: #172B4D;
           font-size: 12px;
-          font-weight: 600;
+          font-weight: 700;
           cursor: pointer;
           transition: background 0.2s;
         }
 
         .save-config-btn:hover:not(:disabled) {
-          background: #f1f5f9;
+          background: #F4F5F7;
         }
 
         .auth-footer-security {
@@ -1054,7 +1059,7 @@ export default function LoginPage() {
           gap: 6px;
           margin-top: 24px;
           font-size: 11px;
-          color: #64748b;
+          color: #6B778C;
           text-align: center;
         }
 
@@ -1063,15 +1068,15 @@ export default function LoginPage() {
         }
 
         .home-link {
-          color: #64748b;
+          color: #6B778C;
           text-decoration: none;
           font-size: 13px;
-          font-weight: 600;
+          font-weight: 700;
           transition: color 0.2s;
         }
 
         .home-link:hover {
-          color: #2563eb;
+          color: #FF6B00;
         }
 
         @media (max-width: 960px) {

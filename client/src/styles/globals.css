@@ -31,7 +31,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .sidebar-bottom { margin-top: auto; border-top: 1px solid #2b3750; padding-top: 11px; }
 .nav-item { width: 64px; min-height: 57px; display: flex; flex-direction: column; gap: 5px; justify-content: center; align-items: center; border: 0; background: transparent; color: #aebbd0; cursor: pointer; border-radius: 5px; font-size: 10px; line-height: 1.1; transition: background .15s ease, color .15s ease; }
 .nav-item:hover { background: #1c2a44; color: #fff; }
-.nav-item.is-active { color: white; background: #2674f5; box-shadow: inset 0 -3px 0 #53c3e6; }
+.nav-item.is-active { color: white; background: linear-gradient(135deg, #FF8B00 0%, #FF5230 100%); box-shadow: 0 4px 12px rgba(255, 107, 0, 0.35); }
 .profile-avatar, .account-dot { height: 36px; width: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; color: #fff; background: #078bd1; font-weight: 700; }
 .profile-avatar { margin-top: 9px; cursor: pointer; }
 .workspace-main { flex: 1; min-width: 0; }

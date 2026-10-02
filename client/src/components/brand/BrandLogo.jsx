@@ -1,46 +1,85 @@
 import React from 'react';
 
-export default function BrandLogo({ size = 42, showText = true, subtitle = 'Fanpage Workspace', light = true }) {
+export default function BrandLogo({ size = 42, showText = true, subtitle = 'Facebook Automation', light = true }) {
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+      {/* SO9 Signature Gradient Icon */}
       <div
         style={{
           width: size,
           height: size,
           borderRadius: 12,
-          background: 'linear-gradient(135deg, #1877F2 0%, #00C6FF 100%)',
+          background: 'linear-gradient(135deg, #FF8B00 0%, #FF5230 100%)',
           display: 'grid',
           placeItems: 'center',
-          boxShadow: '0 8px 24px rgba(24, 119, 242, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.4)',
+          boxShadow: '0 8px 20px rgba(255, 107, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.5)',
           position: 'relative',
           overflow: 'hidden',
           flexShrink: 0
         }}
       >
-        <svg width={size * 0.58} height={size * 0.58} viewBox="0 0 24 24" fill="white">
-          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-        </svg>
+        <span
+          style={{
+            color: '#ffffff',
+            fontWeight: 900,
+            fontSize: size * 0.52,
+            fontFamily: "'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif",
+            letterSpacing: -1,
+            lineHeight: 1
+          }}
+        >
+          S9
+        </span>
       </div>
+
       {showText && (
-        <div style={{ lineHeight: 1.2 }}>
-          <div
-            style={{
-              fontSize: 11,
-              letterSpacing: 1.8,
-              fontWeight: 800,
-              textTransform: 'uppercase',
-              color: light ? '#2563eb' : '#60a5fa',
-              fontFamily: "'Manrope', sans-serif"
-            }}
-          >
-            FACEBOOK TOOL
+        <div style={{ lineHeight: 1.15 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span
+              style={{
+                fontSize: 20,
+                fontWeight: 900,
+                fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
+                color: '#0B1B3D',
+                letterSpacing: -0.5
+              }}
+            >
+              SO
+            </span>
+            <span
+              style={{
+                fontSize: 20,
+                fontWeight: 900,
+                fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
+                color: '#FF6B00',
+                letterSpacing: -0.5
+              }}
+            >
+              9
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: 'rgba(255, 107, 0, 0.1)',
+                color: '#FF6B00',
+                letterSpacing: 0.5,
+                marginLeft: 4,
+                textTransform: 'uppercase'
+              }}
+            >
+              PRO
+            </span>
           </div>
           <div
             style={{
-              fontWeight: 700,
-              fontSize: 16,
-              color: light ? '#0f172a' : '#f8fafc',
-              letterSpacing: -0.3
+              fontWeight: 600,
+              fontSize: 12,
+              color: '#6B778C',
+              letterSpacing: -0.2,
+              marginTop: 2
             }}
           >
             {subtitle}
