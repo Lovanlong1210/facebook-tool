@@ -126,7 +126,7 @@ export default function PostListPage() {
 
   return (
     <MainLayout title="Lịch đăng bài" actions={<button className="button button-secondary" onClick={fetchPosts} type="button"><RefreshCw size={15} /> Làm mới</button>}>
-      <section className="panel">
+      <section className="panel animate-fade-up">
         <div className="filter-bar">
           <div><strong>Danh sách bài đăng</strong><span className="muted"> · {total} mục</span></div>
           <div className="table-tools">

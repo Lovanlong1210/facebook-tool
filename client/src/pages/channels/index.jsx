@@ -263,14 +263,15 @@ export default function ChannelsPage() {
 
       {/* Grid danh sách kênh */}
       <div className="channel-grid">
-        {channels.map((channel) => (
-          <article className="panel channel-card custom-channel-card" key={channel.id}>
+        {channels.map((channel, idx) => (
+          <article className={`panel channel-card custom-channel-card card-interactive animate-fade-up delay-${(idx % 4) + 1}`} key={channel.id}>
             <div className="channel-card-head">
               <div className="channel-avatar">
                 <Globe2 size={24} color="#1877f2" />
               </div>
               {channel.hasValidToken !== false ? (
-                <span className="channel-connected">
+                <span className="channel-connected" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', animation: 'pulseGreen 2s infinite' }} />
                   <Check size={14} /> Sẵn sàng đăng
                 </span>
               ) : (
@@ -294,7 +295,7 @@ export default function ChannelsPage() {
 
             <div className="channel-actions-bar">
               <Link
-                href={`/editor?pageId=${channel.id}`}
+                href={`/post-planner/compose?pageId=${channel.id}`}
                 className="btn-action-small btn-primary-soft"
                 title="Tạo bài viết cho Page này"
               >

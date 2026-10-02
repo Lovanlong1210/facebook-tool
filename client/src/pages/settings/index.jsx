@@ -254,13 +254,17 @@ export default function SettingsPage() {
           </div>
 
           {/* Nội dung Tab bên phải */}
-          <div style={{
-            background: '#ffffff',
-            borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            padding: 24,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-          }}>
+          <div
+            className="animate-fade-up"
+            key={activeTab}
+            style={{
+              background: '#ffffff',
+              borderRadius: 12,
+              border: '1px solid #e2e8f0',
+              padding: 24,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            }}
+          >
             {/* TAB 1: HỒ SƠ & TÀI KHOẢN */}
             {activeTab === 'account' && (
               <div>

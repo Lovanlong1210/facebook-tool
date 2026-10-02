@@ -40,7 +40,7 @@ export default function CalendarPage() {
 
   return (
     <MainLayout title="Lịch đăng" actions={<><Link href="/post-planner/list" className="button button-secondary"><List size={15} /> Danh sách</Link><Link href="/post-planner/compose" className="button button-primary"><Plus size={15} /> Tạo bài</Link></>}>
-      <section className="panel calendar-panel">
+      <section className="panel calendar-panel animate-fade-up">
         <div className="filter-bar"><div className="calendar-switch"><button className="segment-button is-selected" type="button">Lịch thủ công</button><button className="segment-button" type="button">Tự động SOS</button></div><div className="calendar-controls"><button className="icon-button" onClick={() => shiftMonth(-1)} type="button" aria-label="Tháng trước"><ChevronLeft size={17} /></button><strong>{monthLabel}</strong><button className="icon-button" onClick={() => shiftMonth(1)} type="button" aria-label="Tháng sau"><ChevronRight size={17} /></button><button className="button button-secondary" onClick={() => setCurrentMonth(new Date())} type="button">Hôm nay</button></div></div>
         {error && <div className="notice" style={{ margin: 12 }}>{error}</div>}
         <div className="calendar-grid">{weekdays.map((day) => <div className="calendar-weekday" key={day}>{day}</div>)}{cells.map(({ date, inMonth }, index) => {

@@ -145,7 +145,7 @@ export default function ComposePage() {
 
       {/* Bước 1: Soạn nội dung */}
       {step === 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(320px, 1fr)', gap: 24, alignItems: 'start' }}>
+        <div className="animate-fade-up" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(320px, 1fr)', gap: 24, alignItems: 'start' }}>
           <div className="panel" style={{ padding: 22 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div>
@@ -232,7 +232,7 @@ export default function ComposePage() {
 
       {/* Bước 2: Chọn kênh & Lên lịch */}
       {step === 1 && (
-        <div className="compose-grid">
+        <div className="compose-grid animate-fade-up">
           {/* Cột chọn Fanpage */}
           <section className="panel compose-panel">
             <div className="panel-heading">
@@ -377,7 +377,7 @@ export default function ComposePage() {
 
       {/* Bước 3: Kiểm tra & Xuất bản */}
       {step === 2 && (
-        <section className="panel" style={{ maxWidth: 760, margin: '0 auto', padding: 24 }}>
+        <section className="panel animate-fade-up" style={{ maxWidth: 760, margin: '0 auto', padding: 24 }}>
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
             <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 6px' }}>Kiểm tra bài viết trước khi xuất bản</h2>
             <p className="muted" style={{ margin: 0 }}>

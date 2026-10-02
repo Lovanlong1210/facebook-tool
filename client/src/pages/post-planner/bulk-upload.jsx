@@ -285,7 +285,7 @@ export default function BulkUpload() {
 
       {/* GIAI ĐOẠN 1: Nếu chưa parse file, hiển thị khung upload và danh sách file đã lưu */}
       {stagedPosts.length === 0 && (
-        <div className="upload-layout">
+        <div className="upload-layout animate-fade-up">
           <section className="panel">
             <div className="panel-heading">
               <h2>Tải tệp lịch đăng Excel</h2>
@@ -400,7 +400,7 @@ export default function BulkUpload() {
 
       {/* GIAI ĐOẠN 2: BẢNG DUYỆT BÀI ĐĂNG (CHỌN BÀI ĐỂ ĐĂNG, XEM, SỬA, XÓA) */}
       {stagedPosts.length > 0 && (
-        <section className="panel" style={{ marginTop: 6 }}>
+        <section className="panel animate-fade-up" style={{ marginTop: 6 }}>
           <div className="panel-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <h2 style={{ fontSize: 18, margin: 0 }}>

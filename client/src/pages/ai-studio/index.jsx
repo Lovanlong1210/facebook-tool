@@ -510,11 +510,13 @@ export default function AIStudioPage() {
               return (
                 <div
                   key={idx}
+                  className="animate-fade-up"
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: isUser ? 'flex-end' : 'flex-start',
-                    maxWidth: '100%'
+                    maxWidth: '100%',
+                    animationDuration: '0.25s'
                   }}
                 >
                   <div style={{
@@ -526,7 +528,7 @@ export default function AIStudioPage() {
                     color: '#64748B',
                     fontWeight: 700
                   }}>
-                    {isUser ? 'Bạn' : msg.agent ? `🤖 ${msg.agent}` : 'Trợ lý AI'}
+                    {isUser ? 'Bạn' : msg.agent ? `🤖 ${msg.agent}` : 'Trợ lý AI Gemini'}
                   </div>
 
                   <div style={{
@@ -540,7 +542,8 @@ export default function AIStudioPage() {
                     fontSize: 14,
                     lineHeight: 1.6,
                     whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word'
+                    wordBreak: 'break-word',
+                    transition: 'all 0.2s ease'
                   }}>
                     {msg.text}
                   </div>
@@ -562,7 +565,8 @@ export default function AIStudioPage() {
                           fontSize: 11,
                           fontWeight: 700,
                           color: '#475569',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
                         }}
                       >
                         {copiedIndex === idx ? <Check size={12} color="#10B981" /> : <Copy size={12} />}
@@ -583,7 +587,8 @@ export default function AIStudioPage() {
                           fontSize: 11,
                           fontWeight: 800,
                           color: '#FF6B00',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
                         }}
                       >
                         <Zap size={12} />
@@ -597,19 +602,30 @@ export default function AIStudioPage() {
             })}
 
             {loading && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748B', fontSize: 13, padding: '10px 0' }}>
+              <div className="animate-fade-scale" style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748B', fontSize: 13, padding: '10px 0' }}>
                 <div style={{
-                  width: 28,
-                  height: 28,
+                  width: 32,
+                  height: 32,
                   borderRadius: '50%',
                   background: 'linear-gradient(115deg, #FF8B00, #FF2E74)',
                   display: 'grid',
                   placeItems: 'center',
-                  color: '#fff'
+                  color: '#fff',
+                  boxShadow: '0 2px 10px rgba(255, 107, 0, 0.35)',
+                  animation: 'floatSlow 2s ease-in-out infinite'
                 }}>
-                  <Bot size={15} />
+                  <Bot size={16} />
                 </div>
-                <span>{isAgentConnected ? `Agent ${currentProviderObj?.name} đang suy nghĩ...` : 'AI đang xử lý yêu cầu...'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ffffff', border: '1px solid #E2E8F0', borderRadius: 14, padding: '8px 14px' }}>
+                  <span style={{ fontSize: 13, color: '#475569', fontWeight: 600 }}>
+                    {isAgentConnected ? `Agent ${currentProviderObj?.name || 'AI'} đang xử lý...` : 'AI đang tạo nội dung...'}
+                  </span>
+                  <div className="typing-dots">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
+                </div>
               </div>
             )}
             <div ref={messagesEndRef} />
